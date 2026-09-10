@@ -1,0 +1,16 @@
+# secrets — never commit
+.streamlit/secrets.toml
+*service-account*.json
+*-key.json
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# local data / scratch
+*.local.csv
+scratch/
