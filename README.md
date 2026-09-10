@@ -13,10 +13,13 @@ Axes* (Koh & Roffey, Sept 2026).
 | Part | State |
 |---|---|
 | `config.py` — contestable values | done |
-| `derivation.py` — pure banding / quadrant / position / action logic | done, 55 tests passing |
-| `loader.py` — read + clean the export | stub |
-| `store.py` — Google Sheet as shared store | stub |
+| `derivation.py` — pure banding / quadrant / position / action logic | done |
+| `loader.py` — read + clean the export | done |
+| `store.py` — Google Sheet as shared store | done (logic; live smoke test pending setup) |
 | `app.py` — Streamlit review table | stub |
+
+77 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
+`python scripts/smoke_test_sheet.py`.
 
 Run the tests:
 

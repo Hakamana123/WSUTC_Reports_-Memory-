@@ -3,3 +3,6 @@ pandas>=2.2
 gspread>=6.1
 google-auth>=2.30
 pytest>=8.0
+
+# gspread pulls in google-auth; google-auth-oauthlib not needed for
+# service-account auth.
