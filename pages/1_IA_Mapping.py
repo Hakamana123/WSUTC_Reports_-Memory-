@@ -34,6 +34,7 @@ st.caption(
 EDITABLE_COLS = [
     "AssureBand", "InspireBand", "Action", "Effort",
     "QuickWins", "ResourceReq", "Rationale", "Confirmed_R2",
+    "Weighting_n", "InspireScore_n", "AssureScore_n",
 ]
 
 
@@ -65,6 +66,11 @@ if "ia_stored" not in st.session_state:
         _reload()
 
 stored: pd.DataFrame = st.session_state["ia_stored"]
+# recompute the numeric working copies fresh every render, from the actual
+# stored strings — never trust a stale helper column from a previous edit
+stored["InspireScore_n"] = pd.to_numeric(stored["Inspire Score"], errors="coerce")
+stored["AssureScore_n"] = pd.to_numeric(stored["Assure Score"], errors="coerce")
+stored["Weighting_n"] = pd.to_numeric(stored["Weighting"], errors="coerce")
 
 
 # --------------------------------------------------------------------------
@@ -157,6 +163,13 @@ def _num_or_none(v):
     return None if pd.isna(v) else int(v)
 
 
+def _fmt_num(v) -> str:
+    """Store a whole number cleanly ("6" not "6.0"); keep a fraction if there is one."""
+    if pd.isna(v):
+        return ""
+    return str(int(v)) if float(v).is_integer() else str(v)
+
+
 def _derive_row(row: pd.Series) -> derivation.Derivation:
     return derivation.derive_task(
         assure_score=None if pd.isna(row["AssureScore_n"]) else float(row["AssureScore_n"]),
@@ -242,7 +255,7 @@ st.caption(f"Showing {len(visible)} of {len(view)} tasks.")
 
 display_cols = [
     "Subject Code", "Subject Title", "Assessment Number", "Position",
-    "Assessment Type", "Weighting", "InspireScore_n", "AssureScore_n",
+    "Assessment Type", "Weighting_n", "InspireScore_n", "AssureScore_n",
     "AssureBand", "InspireBand", "Quadrant", "Quadrant_R1",
     "AxisOnlyAction", "SuggestedAction", "Action", "Effort",
     "QuickWins", "ResourceReq", "Rationale", "Notes/Comments",
@@ -255,9 +268,18 @@ column_config = {
     "Assessment Number": st.column_config.TextColumn("#", disabled=True, width="small"),
     "Position": st.column_config.TextColumn("Pos.", disabled=True, width="small"),
     "Assessment Type": st.column_config.TextColumn("Type", disabled=True),
-    "Weighting": st.column_config.TextColumn("Wt%", disabled=True, width="small"),
-    "InspireScore_n": st.column_config.NumberColumn("Insp. R1", disabled=True, width="small"),
-    "AssureScore_n": st.column_config.NumberColumn("Assure R1", disabled=True, width="small"),
+    "Weighting_n": st.column_config.NumberColumn(
+        "Wt%", min_value=0, max_value=100, step=1, width="small",
+        help="Editing this corrects the round-1 export value.",
+    ),
+    "InspireScore_n": st.column_config.NumberColumn(
+        "Insp. R1", min_value=1, max_value=10, step=1, width="small",
+        help="Editing this corrects the round-1 export value — bands recompute from it.",
+    ),
+    "AssureScore_n": st.column_config.NumberColumn(
+        "Assure R1", min_value=1, max_value=10, step=1, width="small",
+        help="Editing this corrects the round-1 export value — bands recompute from it.",
+    ),
     "AssureBand": st.column_config.SelectboxColumn("Assure band", options=config.ASSURE_BANDS, required=True),
     "InspireBand": st.column_config.SelectboxColumn("Inspire band", options=config.INSPIRE_BANDS, required=True),
     "Quadrant": st.column_config.TextColumn("Quadrant", disabled=True, width="medium"),
@@ -302,6 +324,9 @@ if changed_keys:
         working.loc[key, "ResourceReq"] = row["ResourceReq"]
         working.loc[key, "Rationale"] = row["Rationale"]
         working.loc[key, "Confirmed_R2"] = "TRUE" if row["Confirmed_R2"] else "FALSE"
+        working.loc[key, "Weighting"] = _fmt_num(row["Weighting_n"])
+        working.loc[key, "Inspire Score"] = _fmt_num(row["InspireScore_n"])
+        working.loc[key, "Assure Score"] = _fmt_num(row["AssureScore_n"])
         # freeze the quadrant implied by the bands just written
         working.loc[key, "Quadrant_R2"] = derivation.quadrant(
             derivation.inspire_ordinal(row["InspireBand"]),
