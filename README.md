@@ -15,11 +15,22 @@ Axes* (Koh & Roffey, Sept 2026).
 | `config.py` — contestable values | done |
 | `derivation.py` — pure banding / quadrant / position / action logic | done |
 | `loader.py` — read + clean the export | done |
-| `store.py` — Google Sheet as shared store | done (logic; live smoke test pending setup) |
-| `app.py` — Streamlit review table | stub |
+| `store.py` — Google Sheet as shared store | done, live-verified |
+| `pages/1_IA_Mapping.py` — Streamlit review table | done, live-verified |
+| `pages/2_Workload_Management.py` | not yet scoped |
 
 77 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
 `python scripts/smoke_test_sheet.py`.
+
+This is a **multipage app** (Streamlit's native `pages/` convention, same as
+WSTUCReports) — `app.py` is just the landing page. Run it with:
+
+```
+streamlit run app.py
+```
+
+Not yet deployed to Streamlit Community Cloud, and no GitHub remote yet —
+separate step, unrelated to WSTUCReports' own repo/hosting.
 
 Run the tests:
 
