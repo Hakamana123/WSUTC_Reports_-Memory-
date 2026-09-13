@@ -115,26 +115,20 @@ with st.expander("Import a new export (adds new tasks, refreshes scores — neve
 # sidebar controls
 # --------------------------------------------------------------------------
 
-
-st.sidebar.subheader("Band cut points")
-st.sidebar.caption("A round-1 score bands as: ≥high → top band, ≥mid, ≥low, else bottom.")
-low = st.sidebar.number_input("low", 1, 10, config.DEFAULT_CUT_POINTS[0])
-mid = st.sidebar.number_input("mid", 1, 10, config.DEFAULT_CUT_POINTS[1])
-high = st.sidebar.number_input("high", 1, 10, config.DEFAULT_CUT_POINTS[2])
+# Band cut points and the position toggle are USED here but RENDERED at the
+# bottom of the sidebar (see below) - read whatever the widgets last set via
+# session_state (falls back to the config defaults on the very first run).
+low = st.session_state.get("cut_low", config.DEFAULT_CUT_POINTS[0])
+mid = st.session_state.get("cut_mid", config.DEFAULT_CUT_POINTS[1])
+high = st.session_state.get("cut_high", config.DEFAULT_CUT_POINTS[2])
 if not (low <= mid <= high):
-    st.sidebar.error("cut points must be low ≤ mid ≤ high — using the default for now")
     cut_points = config.DEFAULT_CUT_POINTS
 else:
     cut_points = (low, mid, high)
-
-weight_by_position = st.sidebar.toggle(
-    "Weight action by sequence position",
-    value=config.WEIGHT_BY_POSITION_DEFAULT,
-    help="Softens a weak Assure on an early task or a weak Inspire on a final "
-    "task. Not part of the endorsed proposal — an extension.",
+weight_by_position = st.session_state.get(
+    "weight_by_position", config.WEIGHT_BY_POSITION_DEFAULT
 )
 
-st.sidebar.divider()
 st.sidebar.subheader("Filters")
 programs = st.sidebar.text_input("Program code contains")
 types = st.sidebar.multiselect(
@@ -360,6 +354,22 @@ with st.sidebar.expander("Reset rows to round-1 default"):
         st.session_state["ia_stored"] = working.reset_index(drop=True)
         st.session_state["ia_pending_keys"] = pending | set(picked)
         st.rerun()
+
+st.sidebar.divider()
+st.sidebar.subheader("Band cut points")
+st.sidebar.caption("A round-1 score bands as: ≥high → top band, ≥mid, ≥low, else bottom.")
+st.sidebar.number_input("low", 1, 10, config.DEFAULT_CUT_POINTS[0], key="cut_low")
+st.sidebar.number_input("mid", 1, 10, config.DEFAULT_CUT_POINTS[1], key="cut_mid")
+st.sidebar.number_input("high", 1, 10, config.DEFAULT_CUT_POINTS[2], key="cut_high")
+if not (st.session_state["cut_low"] <= st.session_state["cut_mid"] <= st.session_state["cut_high"]):
+    st.sidebar.error("cut points must be low ≤ mid ≤ high — using the default for now")
+st.sidebar.toggle(
+    "Weight action by sequence position",
+    value=config.WEIGHT_BY_POSITION_DEFAULT,
+    key="weight_by_position",
+    help="Softens a weak Assure on an early task or a weak Inspire on a final "
+    "task. Not part of the endorsed proposal — an extension.",
+)
 
 
 # --------------------------------------------------------------------------
