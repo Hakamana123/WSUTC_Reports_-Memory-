@@ -152,10 +152,28 @@ programs = st.sidebar.multiselect(
     all_program_codes,
     format_func=lambda c: f"{c} — {program_names[c]}" if c in program_names else c,
 )
-types = st.sidebar.multiselect(
-    "Assessment type", sorted(stored["Assessment Type"].unique())
+# Subject choices narrow to whatever's in the selected program(s) - pick a
+# program first, then a much shorter, relevant subject list.
+subject_titles: dict[str, str] = {}
+for code, title in zip(stored["Subject Code"], stored["Subject Title"]):
+    subject_titles.setdefault(code, title)
+if programs:
+    selected_programs_for_subjects = set(programs)
+    subject_rows = stored["Program Code"].apply(
+        lambda codes: bool(selected_programs_for_subjects & set(_split_codes(codes)))
+    )
+    available_subjects = sorted(set(stored.loc[subject_rows, "Subject Code"]))
+else:
+    available_subjects = sorted(subject_titles)
+subjects = st.sidebar.multiselect(
+    "Subject",
+    available_subjects,
+    format_func=lambda c: f"{c} — {subject_titles.get(c, '')}",
 )
-subject_q = st.sidebar.text_input("Subject code / title contains")
+assessment_numbers = st.sidebar.multiselect(
+    "Assessment number",
+    sorted(stored["Assessment Number"].unique(), key=lambda n: (len(n), n)),
+)
 confirmed_filter = st.sidebar.selectbox(
     "Confirmation", ["All", "Not yet confirmed", "Confirmed"]
 )
@@ -247,14 +265,10 @@ if programs:
     mask &= stored.set_axis(view.index)["Program Code"].apply(
         lambda codes: bool(selected_programs & set(_split_codes(codes)))
     )
-if types:
-    mask &= stored.set_axis(view.index)["Assessment Type"].isin(types)
-if subject_q:
-    hay = (
-        stored.set_axis(view.index)["Subject Code"] + " "
-        + stored.set_axis(view.index)["Subject Title"]
-    )
-    mask &= hay.str.contains(subject_q, case=False, na=False)
+if subjects:
+    mask &= stored.set_axis(view.index)["Subject Code"].isin(subjects)
+if assessment_numbers:
+    mask &= stored.set_axis(view.index)["Assessment Number"].isin(assessment_numbers)
 if confirmed_filter == "Confirmed":
     mask &= view["Confirmed_R2"] == "TRUE"
 elif confirmed_filter == "Not yet confirmed":
