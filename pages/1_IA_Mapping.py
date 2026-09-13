@@ -17,12 +17,14 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import auth
 import config
 import derivation
 import loader
 import store
 
 st.set_page_config(page_title="IA Mapping", page_icon="🧭", layout="wide")
+auth.require_access()
 st.title("🧭 IA Mapping")
 st.caption(
     "Inspire × Assure review — based on Koh & Roffey, "

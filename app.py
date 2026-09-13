@@ -5,7 +5,10 @@
 
 import streamlit as st
 
+import auth
+
 st.set_page_config(page_title="IA Mapping", page_icon="🧭", layout="wide")
+auth.require_access()
 
 st.title("IA Mapping")
 st.markdown(
