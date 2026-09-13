@@ -129,8 +129,15 @@ weight_by_position = st.session_state.get(
     "weight_by_position", config.WEIGHT_BY_POSITION_DEFAULT
 )
 
+def _split_codes(value: str) -> list[str]:
+    return [c.strip() for c in str(value).split(",") if c.strip()]
+
+
 st.sidebar.subheader("Filters")
-programs = st.sidebar.text_input("Program code contains")
+all_program_codes = sorted(
+    {code for codes in stored["Program Code"] for code in _split_codes(codes)}
+)
+programs = st.sidebar.multiselect("Program", all_program_codes)
 types = st.sidebar.multiselect(
     "Assessment type", sorted(stored["Assessment Type"].unique())
 )
@@ -222,7 +229,10 @@ view.index = stored["RowKey"]
 
 mask = pd.Series(True, index=view.index)
 if programs:
-    mask &= stored.set_axis(view.index)["Program Code"].str.contains(programs, case=False, na=False)
+    selected_programs = set(programs)
+    mask &= stored.set_axis(view.index)["Program Code"].apply(
+        lambda codes: bool(selected_programs & set(_split_codes(codes)))
+    )
 if types:
     mask &= stored.set_axis(view.index)["Assessment Type"].isin(types)
 if subject_q:
