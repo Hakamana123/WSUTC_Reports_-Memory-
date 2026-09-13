@@ -9,6 +9,7 @@ untouched row keeps tracking the sidebar cut-points and toggle.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -22,6 +23,14 @@ import config
 import derivation
 import loader
 import store
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+@st.cache_data
+def _program_names() -> dict[str, str]:
+    path = ROOT / "program_names.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 st.set_page_config(page_title="IA Mapping", page_icon="🧭", layout="wide")
 auth.require_access()
@@ -137,7 +146,12 @@ st.sidebar.subheader("Filters")
 all_program_codes = sorted(
     {code for codes in stored["Program Code"] for code in _split_codes(codes)}
 )
-programs = st.sidebar.multiselect("Program", all_program_codes)
+program_names = _program_names()
+programs = st.sidebar.multiselect(
+    "Program",
+    all_program_codes,
+    format_func=lambda c: f"{c} — {program_names[c]}" if c in program_names else c,
+)
 types = st.sidebar.multiselect(
     "Assessment type", sorted(stored["Assessment Type"].unique())
 )
