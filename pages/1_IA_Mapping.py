@@ -43,7 +43,7 @@ st.caption(
 EDITABLE_COLS = [
     "AssureBand", "InspireBand", "Action", "Effort",
     "QuickWins", "ResourceReq", "Rationale", "Confirmed_R2",
-    "Weighting_n", "InspireScore_n", "AssureScore_n",
+    "Weighting_n",
 ]
 
 
@@ -285,14 +285,24 @@ st.caption(f"Showing {len(visible)} of {len(view)} tasks.")
 # --------------------------------------------------------------------------
 
 
+# Round-1 numeric scores (Insp./Assure out of 10) are intentionally NOT
+# shown — staff set the band directly via the dropdowns instead. The scores
+# still drive the live-derived default band underneath; there's just no
+# column for them any more.
 display_cols = [
     "Subject Code", "Subject Title", "Assessment Number", "Position",
-    "Assessment Type", "Weighting_n", "InspireScore_n", "AssureScore_n",
+    "Assessment Type", "Weighting_n",
     "AssureBand", "InspireBand", "Quadrant", "Quadrant_R1",
     "AxisOnlyAction", "SuggestedAction", "Action", "Effort",
     "QuickWins", "ResourceReq", "Rationale", "Notes/Comments",
     "Confirmed_R2", "Confirmed_R1", "Flags",
 ]
+
+# Streamlit's data_editor can't take per-column background colours (it's a
+# canvas grid, not styleable table cells - Styler support is a st.dataframe
+# thing only). A "✏️" on the label is the practical stand-in for "you can
+# edit this one".
+EDIT = "✏️ "
 
 column_config = {
     "Subject Code": st.column_config.TextColumn("Subject", disabled=True),
@@ -301,30 +311,26 @@ column_config = {
     "Position": st.column_config.TextColumn("Pos.", disabled=True, width="small"),
     "Assessment Type": st.column_config.TextColumn("Type", disabled=True),
     "Weighting_n": st.column_config.NumberColumn(
-        "Wt%", min_value=0, max_value=100, step=1, width="small",
+        EDIT + "Wt%", min_value=0, max_value=100, step=1, width="small",
         help="Editing this corrects the round-1 export value.",
     ),
-    "InspireScore_n": st.column_config.NumberColumn(
-        "Insp. R1", min_value=1, max_value=10, step=1, width="small",
-        help="Editing this corrects the round-1 export value — bands recompute from it.",
+    "AssureBand": st.column_config.SelectboxColumn(
+        EDIT + "Assure band", options=config.ASSURE_BANDS, required=True,
     ),
-    "AssureScore_n": st.column_config.NumberColumn(
-        "Assure R1", min_value=1, max_value=10, step=1, width="small",
-        help="Editing this corrects the round-1 export value — bands recompute from it.",
+    "InspireBand": st.column_config.SelectboxColumn(
+        EDIT + "Inspire band", options=config.INSPIRE_BANDS, required=True,
     ),
-    "AssureBand": st.column_config.SelectboxColumn("Assure band", options=config.ASSURE_BANDS, required=True),
-    "InspireBand": st.column_config.SelectboxColumn("Inspire band", options=config.INSPIRE_BANDS, required=True),
     "Quadrant": st.column_config.TextColumn("Quadrant", disabled=True, width="medium"),
     "Quadrant_R1": st.column_config.TextColumn("R1 label", disabled=True),
     "AxisOnlyAction": st.column_config.TextColumn("Axis-only", disabled=True),
     "SuggestedAction": st.column_config.TextColumn("Suggested", disabled=True),
-    "Action": st.column_config.SelectboxColumn("Action", options=config.ACTIONS, required=True),
-    "Effort": st.column_config.SelectboxColumn("Effort", options=[""] + config.EFFORT_LEVELS),
-    "QuickWins": st.column_config.TextColumn("Quick wins"),
-    "ResourceReq": st.column_config.TextColumn("Resource reqs"),
-    "Rationale": st.column_config.TextColumn("Rationale"),
+    "Action": st.column_config.SelectboxColumn(EDIT + "Action", options=config.ACTIONS, required=True),
+    "Effort": st.column_config.SelectboxColumn(EDIT + "Effort", options=[""] + config.EFFORT_LEVELS),
+    "QuickWins": st.column_config.TextColumn(EDIT + "Quick wins"),
+    "ResourceReq": st.column_config.TextColumn(EDIT + "Resource reqs"),
+    "Rationale": st.column_config.TextColumn(EDIT + "Rationale"),
     "Notes/Comments": st.column_config.TextColumn("R1 note", disabled=True, width="medium"),
-    "Confirmed_R2": st.column_config.CheckboxColumn("Confirmed"),
+    "Confirmed_R2": st.column_config.CheckboxColumn(EDIT + "Confirmed"),
     "Confirmed_R1": st.column_config.TextColumn("R1 ✓", disabled=True, width="small"),
     "Flags": st.column_config.TextColumn("Flags", disabled=True, width="medium"),
 }
@@ -357,8 +363,6 @@ if changed_keys:
         working.loc[key, "Rationale"] = row["Rationale"]
         working.loc[key, "Confirmed_R2"] = "TRUE" if row["Confirmed_R2"] else "FALSE"
         working.loc[key, "Weighting"] = _fmt_num(row["Weighting_n"])
-        working.loc[key, "Inspire Score"] = _fmt_num(row["InspireScore_n"])
-        working.loc[key, "Assure Score"] = _fmt_num(row["AssureScore_n"])
         # freeze the quadrant implied by the bands just written
         working.loc[key, "Quadrant_R2"] = derivation.quadrant(
             derivation.inspire_ordinal(row["InspireBand"]),
