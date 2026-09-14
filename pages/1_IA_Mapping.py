@@ -292,10 +292,10 @@ st.caption(f"Showing {len(visible)} of {len(view)} tasks.")
 display_cols = [
     "Subject Code", "Subject Title", "Assessment Number", "Position",
     "Assessment Type", "Weighting_n",
-    "AssureBand", "InspireBand", "Quadrant", "Quadrant_R1",
-    "AxisOnlyAction", "SuggestedAction", "Action", "Effort",
+    "AssureBand", "InspireBand", "Quadrant",
+    "SuggestedAction", "Action", "Effort",
     "QuickWins", "ResourceReq", "Rationale", "Notes/Comments",
-    "Confirmed_R2", "Confirmed_R1", "Flags",
+    "Confirmed_R2", "Flags",
 ]
 
 # Streamlit's data_editor can't take per-column background colours (it's a
@@ -321,17 +321,18 @@ column_config = {
         EDIT + "Inspire band", options=config.INSPIRE_BANDS, required=True,
     ),
     "Quadrant": st.column_config.TextColumn("Quadrant", disabled=True, width="medium"),
-    "Quadrant_R1": st.column_config.TextColumn("R1 label", disabled=True),
-    "AxisOnlyAction": st.column_config.TextColumn("Axis-only", disabled=True),
-    "SuggestedAction": st.column_config.TextColumn("Suggested", disabled=True),
+    "SuggestedAction": st.column_config.TextColumn(
+        "AI advice", disabled=True,
+        help="Rule-based, not AI-generated — driven by the weaker band and "
+        "(if on) the sequence-position weighting. Named for how it reads to reviewers.",
+    ),
     "Action": st.column_config.SelectboxColumn(EDIT + "Action", options=config.ACTIONS, required=True),
     "Effort": st.column_config.SelectboxColumn(EDIT + "Effort", options=[""] + config.EFFORT_LEVELS),
     "QuickWins": st.column_config.TextColumn(EDIT + "Quick wins"),
     "ResourceReq": st.column_config.TextColumn(EDIT + "Resource reqs"),
     "Rationale": st.column_config.TextColumn(EDIT + "Rationale"),
-    "Notes/Comments": st.column_config.TextColumn("R1 note", disabled=True, width="medium"),
+    "Notes/Comments": st.column_config.TextColumn("Notes from Round 1", disabled=True, width="medium"),
     "Confirmed_R2": st.column_config.CheckboxColumn(EDIT + "Confirmed"),
-    "Confirmed_R1": st.column_config.TextColumn("R1 ✓", disabled=True, width="small"),
     "Flags": st.column_config.TextColumn("Flags", disabled=True, width="medium"),
 }
 
