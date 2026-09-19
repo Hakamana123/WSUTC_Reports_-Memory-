@@ -86,8 +86,9 @@ unit The College Enterprise Agreement 2022 uses (Sch B 2.7).
 
 **Memory.** Four tabs, created on first save: `wl_staff`, `wl_allocations`,
 `wl_adjustments`, and `wl_log` (append-only: who changed which field, from
-what, to what, when; removed rows keep their contents). They go in the IA
-Mapping Sheet unless `[workload] sheet_id` in secrets points at another one.
+what, to what, when; removed rows keep their contents). They live in their
+own Sheet (`workload_store.DEFAULT_SHEET_ID`), which must be shared with the
+service account as an Editor; `[workload] sheet_id` in secrets overrides it.
 
 ## Deployment (planned)
 

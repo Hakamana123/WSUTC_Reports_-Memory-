@@ -1,4 +1,4 @@
-"""Workload Management's memory: four tabs in the same Google Sheet as IA Mapping.
+"""Workload Management's memory: four tabs in its own Google Sheet.
 
   * `wl_staff`        — who's on the team: role, FTE, supervisor.
   * `wl_allocations`  — teaching: one line per class/subject a person teaches in
@@ -59,11 +59,16 @@ LOG_NAME = "wl_log"
 LOG_COLUMNS = ["At", "By", "Table", "ID", "Row", "Change", "Field", "From", "To"]
 
 
+# The Workload Management Sheet. Not a secret: it's useless without the
+# service account, which must be shared on it as an Editor. `[workload]
+# sheet_id` in secrets overrides it.
+DEFAULT_SHEET_ID = "1A9kECrfTxCQod5EC2s0O-WRIg-ywnB8Ry72t3AbIctU"
+
+
 def backends_from_secrets(secrets) -> dict[str, GSheetBackend]:
     """{table name: backend} for the three tables plus the log."""
     sa = dict(secrets["gcp_service_account"])
-    # its own Sheet if [workload] sheet_id is set, else the IA Mapping one
-    sheet_id = secrets.get("workload", {}).get("sheet_id") or secrets["sheet"]["id"]
+    sheet_id = secrets.get("workload", {}).get("sheet_id") or DEFAULT_SHEET_ID
     out = {t.name: GSheetBackend(sa, sheet_id, t.name, len(t.all_columns)) for t in TABLES.values()}
     out[LOG_NAME] = GSheetBackend(sa, sheet_id, LOG_NAME, len(LOG_COLUMNS))
     return out
