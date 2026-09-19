@@ -12,6 +12,7 @@ a log tab, shown under History.
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 
@@ -23,10 +24,19 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import auth
+import store
 import workload_config as cfg
 import workload_rules as rules
 import workload_store as wstore
-from workload_store import ADJUSTMENTS, ALLOCATIONS, STAFF
+
+# Streamlit Cloud pulls a new commit without restarting Python: this page is
+# re-read from disk every run, but helper modules imported before the pull
+# (store.py, via IA Mapping) stay as the old code until the app is rebooted.
+# Reload them, in dependency order, so a push always takes effect here.
+for _m in (store, cfg, rules, wstore):
+    importlib.reload(_m)
+
+from workload_store import ADJUSTMENTS, ALLOCATIONS, STAFF  # noqa: E402
 
 st.set_page_config(page_title="Workload Management", page_icon="📋", layout="wide")
 auth.require_access()
