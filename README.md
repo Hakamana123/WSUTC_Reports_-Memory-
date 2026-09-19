@@ -17,9 +17,11 @@ Axes* (Koh & Roffey, Sept 2026).
 | `loader.py` — read + clean the export | done |
 | `store.py` — Google Sheet as shared store | done, live-verified |
 | `pages/1_IA_Mapping.py` — Streamlit review table | done, live-verified |
-| `pages/2_Workload_Management.py` | not yet scoped |
+| `workload_config.py` / `workload_rules.py` — roles, DI-hour limits, load maths | done |
+| `workload_store.py` — staff / teaching / adjustments tabs + change log | done |
+| `pages/2_Workload_Management.py` — supervisor dashboard and editors | done, tested against a fake Sheet (not yet live) |
 
-77 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
+105 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
 `python scripts/smoke_test_sheet.py`.
 
 This is a **multipage app** (Streamlit's native `pages/` convention, same as
@@ -59,6 +61,33 @@ python -m pytest
    stronger — and only those two directions, never the reverse.
 
 Everything contestable is in `config.py`.
+
+## Workload Management
+
+For supervisors. Load is in **Direct Instruction (DI) hours per week** — the
+unit The College Enterprise Agreement 2022 uses (Sch B 2.7).
+
+- **Staff** — name, role, FTE, supervisor, home discipline. Role sets the
+  weekly DI limit (× FTE): Teacher (Ongoing) 16 (Sch B 2.7), Subject
+  Coordinator 12, Program Coordinator 8, Teacher (Casual) no limit. The
+  coordinator roles are the current names for the EA's FYE Coordinator and
+  L&T Coordinator, at the College's own limits. All in `workload_config.ROLES`.
+- **Teaching** — one line per class/subject: person, session (`26 SPR`),
+  block (1–4 or All), discipline, DI hours/week. Someone teaching across
+  disciplines just has several lines; the dashboard adds them up.
+- **Higher duties & relief** — acting as a Program or Subject Coordinator swaps in that role's
+  limit for the blocks it covers; relief (curriculum development, travel
+  between campuses, other) takes hours off the limit.
+- **Dashboard** — per person: load vs limit, per block, by discipline, and a
+  year average (DI hours may vary by session and average out, Sch B 2.9).
+  ⛔ over on average · ⚠ over in a block only · ✅ full · 🟦 spare. Filter by
+  supervisor or discipline — a discipline filter still shows each person's
+  whole load, including hours taught in other disciplines.
+
+**Memory.** Four tabs, created on first save: `wl_staff`, `wl_allocations`,
+`wl_adjustments`, and `wl_log` (append-only: who changed which field, from
+what, to what, when; removed rows keep their contents). They go in the IA
+Mapping Sheet unless `[workload] sheet_id` in secrets points at another one.
 
 ## Deployment (planned)
 

@@ -70,7 +70,13 @@ class Backend(Protocol):
 
 
 class GSheetBackend:
-    def __init__(self, service_account_info: dict, sheet_id: str, worksheet: str):
+    def __init__(
+        self,
+        service_account_info: dict,
+        sheet_id: str,
+        worksheet: str,
+        n_cols: int | None = None,
+    ):
         import gspread
         from google.oauth2.service_account import Credentials
 
@@ -82,6 +88,7 @@ class GSheetBackend:
         self._gc = gspread.authorize(creds)
         self._sheet_id = sheet_id
         self._worksheet_name = worksheet
+        self._n_cols = n_cols or len(STORED_COLUMNS)
 
     def _ws(self):
         import gspread
@@ -90,7 +97,7 @@ class GSheetBackend:
         try:
             return sh.worksheet(self._worksheet_name)
         except gspread.WorksheetNotFound:
-            return sh.add_worksheet(self._worksheet_name, rows=1, cols=len(STORED_COLUMNS))
+            return sh.add_worksheet(self._worksheet_name, rows=1, cols=self._n_cols)
 
     def read_records(self) -> list[dict]:
         return self._ws().get_all_records()
