@@ -24,3 +24,6 @@ All changes save to one shared Google Sheet — see `SETUP_GOOGLE_SHEET.md` if
 this is the first run.
 """
 )
+
+st.divider()
+st.link_button("⬅️ Back to WSUTC Reports", "https://wstucreports.streamlit.app/")
