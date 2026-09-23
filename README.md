@@ -17,11 +17,11 @@ Axes* (Koh & Roffey, Sept 2026).
 | `loader.py` — read + clean the export | done |
 | `store.py` — Google Sheet as shared store | done, live-verified |
 | `pages/1_IA_Mapping.py` — Streamlit review table | done, live-verified |
-| `workload_config.py` / `workload_rules.py` — roles, DI-hour limits, load maths | done |
-| `workload_store.py` — staff / teaching / adjustments tabs + change log | done |
-| `pages/2_Workload_Management.py` — supervisor dashboard and editors | done, tested against a fake Sheet (not yet live) |
+| `workload_config.py` / `workload_rules.py` — roles, annual targets, year maths | done |
+| `workload_store.py` — staff / teaching / duties / calendar tabs + change log | done |
+| `pages/2_Workload_Management.py` — supervisor dashboard and editors | live |
 
-105 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
+115 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
 `python scripts/smoke_test_sheet.py`.
 
 This is a **multipage app** (Streamlit's native `pages/` convention, same as
@@ -31,8 +31,8 @@ WSTUCReports) — `app.py` is just the landing page. Run it with:
 streamlit run app.py
 ```
 
-Not yet deployed to Streamlit Community Cloud, and no GitHub remote yet —
-separate step, unrelated to WSTUCReports' own repo/hosting.
+Deployed on Streamlit Community Cloud at https://wsutcreportmem.streamlit.app/
+(separate from WSTUCReports' own repo/hosting).
 
 Run the tests:
 
@@ -64,28 +64,34 @@ Everything contestable is in `config.py`.
 
 ## Workload Management
 
-For supervisors. Load is in **Direct Instruction (DI) hours per week** — the
-unit The College Enterprise Agreement 2022 uses (Sch B 2.7).
+For supervisors. Each person's **year in hours** against an annual target:
+their role's Direct Instruction (DI) hrs/wk × FTE × 36 teaching weeks — 576 h
+for a full-time Teacher (The College Enterprise Agreement 2022, Sch B 2.7).
+The sidebar picks the year and an "as at" date.
 
-- **Staff** — name, role, FTE, supervisor, home discipline. Role sets the
-  weekly DI limit (× FTE): Teacher (Ongoing) 16 (Sch B 2.7), Subject
-  Coordinator 12, Program Coordinator 8, Teacher (Casual) no limit. The
-  coordinator roles are the current names for the EA's FYE Coordinator and
-  L&T Coordinator, at the College's own limits. All in `workload_config.ROLES`.
-- **Teaching** — one line per class/subject: person, session (`26 SPR`),
+- **Staff** — name, role, FTE, supervisor, home discipline; one row per
+  person. Role sets the DI hrs/wk: Teacher (Ongoing) 16, Subject Coordinator
+  10, Program Coordinator 6, Associate Director 0, Teacher (Casual) no
+  target. All in `workload_config.ROLES`.
+- **Calendar** — each block of the year: start date and teaching weeks.
+  Hours = DI hrs/wk × these weeks; "to date" counts the weeks passed.
+- **Teaching** — one line per class/subject: person, session (dropdown),
   block (1–4 or All), discipline, DI hours/week. Someone teaching across
   disciplines just has several lines; the dashboard adds them up.
-- **Higher duties & relief** — acting as a Program or Subject Coordinator swaps in that role's
-  limit for the blocks it covers; relief (curriculum development, travel
-  between campuses, other) takes hours off the limit.
-- **Dashboard** — per person: load vs limit, per block, by discipline, and a
-  year average (DI hours may vary by session and average out, Sch B 2.9).
-  ⛔ over on average · ⚠ over in a block only · ✅ full · 🟦 spare. Filter by
-  supervisor or discipline — a discipline filter still shows each person's
-  whole load, including hours taught in other disciplines.
+- **Higher duties & other duties** — acting in a more senior role turns the
+  DI hours that role doesn't teach into HDA hours (Teacher → Subject
+  Coordinator 16 → 10 = 6 h/wk; Subject → Program Coordinator 10 → 6; Program
+  Coordinator → Associate Director 6 → 0). Acting role N/A or other types
+  (curriculum development, travel, other): the hours/week entered. Optional
+  Weeks = part of a block, counted from its start.
+- **Dashboard** — per person: target, teaching, HDA / other duties, projected
+  total, ± target, to date, left (target − to date), average hrs/wk, and
+  hours per session. 🟢 on track (within ±5 %) · 🟠 off track — over ·
+  🟡 off track — under; filter by status, supervisor or discipline. The chart
+  stacks each person's teaching by discipline plus HDA / other duties.
 
-**Memory.** Four tabs, created on first save: `wl_staff`, `wl_allocations`,
-`wl_adjustments`, and `wl_log` (append-only: who changed which field, from
+**Memory.** Five tabs, created on first save: `wl_staff`, `wl_allocations`,
+`wl_adjustments`, `wl_calendar`, and `wl_log` (append-only: who changed which field, from
 what, to what, when; removed rows keep their contents). They live in their
 own Sheet (`workload_store.DEFAULT_SHEET_ID`), which must be shared with the
 service account as an Editor; `[workload] sheet_id` in secrets overrides it.

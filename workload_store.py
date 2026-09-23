@@ -1,10 +1,11 @@
-"""Workload Management's memory: four tabs in its own Google Sheet.
+"""Workload Management's memory: five tabs in its own Google Sheet.
 
   * `wl_staff`        — who's on the team: role, FTE, supervisor.
   * `wl_allocations`  — teaching: one line per class/subject a person teaches in
                         a session (and block), with its discipline and DI hours.
-  * `wl_adjustments`  — higher duties and other relief that change a person's
-                        limit for a session/block.
+  * `wl_adjustments`  — higher duties and other duties that take hours out of
+                        a person's teaching for a session/block (or part of one).
+  * `wl_calendar`     — each block's start date and number of teaching weeks.
   * `wl_log`          — append-only history across all three: who changed
                         which field, from what, to what, when — and the full
                         contents of anything removed. Never edited.
@@ -50,10 +51,15 @@ ALLOCATIONS = Table(
 )
 ADJUSTMENTS = Table(
     "wl_adjustments",
-    ["Staff", "Session", "Block", "Type", "Acting role", "DI relief hrs/wk", "Notes"],
+    ["Staff", "Session", "Block", "Weeks", "Type", "Acting role", "DI relief hrs/wk", "Notes"],
     ("Staff", "Session", "Type"),
 )
-TABLES = {t.name: t for t in (STAFF, ALLOCATIONS, ADJUSTMENTS)}
+CALENDAR = Table(
+    "wl_calendar",
+    ["Session", "Block", "Start date", "Teaching weeks", "Notes"],
+    ("Session", "Block"),
+)
+TABLES = {t.name: t for t in (STAFF, ALLOCATIONS, ADJUSTMENTS, CALENDAR)}
 
 LOG_NAME = "wl_log"
 LOG_COLUMNS = ["At", "By", "Table", "ID", "Row", "Change", "Field", "From", "To"]
@@ -66,7 +72,7 @@ DEFAULT_SHEET_ID = "1A9kECrfTxCQod5EC2s0O-WRIg-ywnB8Ry72t3AbIctU"
 
 
 def backends_from_secrets(secrets) -> dict[str, GSheetBackend]:
-    """{table name: backend} for the three tables plus the log."""
+    """{table name: backend} for every table plus the log."""
     sa = dict(secrets["gcp_service_account"])
     sheet_id = secrets.get("workload", {}).get("sheet_id") or DEFAULT_SHEET_ID
     out = {t.name: GSheetBackend(sa, sheet_id, t.name, len(t.all_columns)) for t in TABLES.values()}
@@ -168,6 +174,15 @@ def copy_session(allocations: pd.DataFrame, source: str, target: str, staff=None
         row = {c: r[c] for c in ALLOCATIONS.columns}
         row.update({"ID": new_id(), "Session": target, "Notes": f"Copied from {source}."})
         rows.append(row)
+    return rows
+
+
+def copy_year(allocations: pd.DataFrame, source_yy: str, target_yy: str, staff=None) -> list[dict]:
+    """copy_session for every session of year `source_yy` ("26") into the
+    same session of `target_yy`."""
+    rows = []
+    for s in sorted({s for s in allocations["Session"] if str(s).startswith(f"{source_yy} ")}):
+        rows += copy_session(allocations, s, f"{target_yy} {s.partition(' ')[2]}", staff=staff)
     return rows
 
 

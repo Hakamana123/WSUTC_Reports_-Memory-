@@ -1,18 +1,28 @@
-"""Teaching load vs limit, per staff member per session and block.
+"""A staff member's workload over a year, against their annual target.
 
 Pure functions over DataFrames of stored strings — no Streamlit, no Sheet.
 
-How a person's week is worked out, for one block of one session:
-  * load  = the DI hours/week of every allocation in that block (an
-            allocation for block "All" counts in each of the four blocks);
-  * limit = their role's DI maximum × FTE — or, if they're acting in higher
-            duties for that block, the acting role's maximum × FTE — minus any
-            relief hours (curriculum development, travel, ...),
-            never below zero.
+How a person's year is worked out:
+  * target   = their role's DI hrs/wk × FTE × 36 weeks (576 h for a
+               full-time Teacher);
+  * teaching = for every block in the Calendar, the DI hrs/wk of their
+               teaching lines in that block × the block's teaching weeks
+               (a line for block "All" counts in each block);
+  * duties   = higher duties and other duties, in hours:
+                 - acting in a more senior role: the DI hours that role
+                   doesn't teach, per week (Teacher → Subject Coordinator
+                   16 → 10 = 6 h/wk), × FTE;
+                 - anything else (or acting role N/A): the hrs/wk entered;
+               × the weeks it covers (the whole block, or the "Weeks" given,
+               counted from the block's start);
+  * total    = teaching + duties — the projected year, compared with the
+               target: within ±5 % is on track, otherwise off track (over or
+               under).
+  * to date  = the same sums, counting only the weeks of each block that
+               have passed by the "as at" date; left = target − to date.
 
-The session figure is the average over its four blocks. Being over in one
-block but not on average is a "peak", not an overload: the EA lets DI hours
-vary and average out (Sch B 2.9).
+Teaching in several disciplines is simply several lines; everything adds up
+to one row per person.
 """
 
 from __future__ import annotations
@@ -21,11 +31,13 @@ import pandas as pd
 
 import workload_config as cfg
 
-STATUS_OVER = "⛔ Over"
-STATUS_PEAK = "⚠ Peak"
-STATUS_FULL = "✅ Full"
-STATUS_SPARE = "🟦 Spare"
-STATUS_CASUAL = "Casual"
+STATUS_ON = "🟢 On track"
+STATUS_OVER = "🟠 Off track — over"
+STATUS_UNDER = "🟡 Off track — under"
+STATUS_CASUAL = "⚪ Casual"
+STATUSES = [STATUS_ON, STATUS_OVER, STATUS_UNDER, STATUS_CASUAL]
+
+DUTIES = "HDA / other duties"
 
 
 def num(value) -> float:
@@ -42,10 +54,20 @@ def fte(value) -> float:
     return v if 0 < v <= 1 else 1.0
 
 
+def weekly_di(role: str) -> float | None:
+    """Full-time DI hrs/wk for the role. None = no limit (casual)."""
+    return cfg.ROLES.get(role, cfg.ROLES[cfg.DEFAULT_ROLE])
+
+
 def role_limit(role: str, fte_: float) -> float | None:
-    """Full-time DI max for the role, scaled by FTE. None = no limit (casual)."""
-    di = cfg.ROLES.get(role, cfg.ROLES[cfg.DEFAULT_ROLE])
+    """Full-time DI hrs/wk for the role, scaled by FTE. None = no limit (casual)."""
+    di = weekly_di(role)
     return None if di is None else di * fte_
+
+
+def annual_target(role: str, fte_: float) -> float | None:
+    limit = role_limit(role, fte_)
+    return None if limit is None else limit * cfg.ANNUAL_WEEKS
 
 
 def in_block(line_block: str, block: str) -> bool:
@@ -55,6 +77,14 @@ def in_block(line_block: str, block: str) -> bool:
 
 def session_of(year: int, session: str) -> str:
     return f"{year % 100:02d} {session}"
+
+
+def year_sessions(yy: str) -> list[str]:
+    return [f"{yy} {s}" for s in cfg.SESSIONS]
+
+
+def in_year(session, yy: str) -> bool:
+    return str(session).startswith(f"{yy} ")
 
 
 def default_session(today: pd.Timestamp | None = None) -> str:
@@ -74,121 +104,167 @@ def session_sort_key(s: str) -> tuple[int, int]:
 
 
 # --------------------------------------------------------------------------
+# calendar
+# --------------------------------------------------------------------------
 
 
-def person_session(
+def calendar_blocks(calendar: pd.DataFrame, yy: str) -> list[dict]:
+    """The year's blocks in order: {Session, Block, start (Timestamp | None), weeks}."""
+    rows = []
+    for _, r in calendar[calendar["Session"].map(lambda s: in_year(s, yy))].iterrows():
+        start = pd.to_datetime(r["Start date"], errors="coerce")
+        rows.append({"Session": r["Session"], "Block": str(r["Block"]).strip(),
+                     "start": None if pd.isna(start) else start, "weeks": num(r["Teaching weeks"])})
+    return sorted(rows, key=lambda r: (session_sort_key(r["Session"]), r["Block"]))
+
+
+def elapsed_weeks(start: pd.Timestamp | None, weeks: float, as_at: pd.Timestamp) -> float:
+    """Teaching weeks of a block that have passed by `as_at` (inclusive)."""
+    if start is None or weeks <= 0:
+        return 0.0
+    days = (pd.Timestamp(as_at).normalize() - start.normalize()).days + 1
+    return min(max(days / 7, 0.0), weeks)
+
+
+def calendar_gaps(allocations: pd.DataFrame, adjustments: pd.DataFrame,
+                  calendar: pd.DataFrame, yy: str) -> list[str]:
+    """Session · block pairs with teaching or duties this year but no weeks in
+    the Calendar — their hours count as zero until the Calendar is filled in."""
+    have = {(r["Session"], r["Block"]) for r in calendar_blocks(calendar, yy) if r["weeks"] > 0}
+    used = set()
+    for t in (allocations, adjustments):
+        for s, b in zip(t["Session"], t["Block"]):
+            if in_year(s, yy):
+                for blk in (cfg.BLOCKS if str(b).strip() in ("", cfg.ALL_BLOCKS) else [str(b).strip()]):
+                    used.add((s, blk))
+    return [f"{s} B{b}" for s, b in sorted(used - have, key=lambda sb: (session_sort_key(sb[0]), sb[1]))]
+
+
+# --------------------------------------------------------------------------
+# one person's year
+# --------------------------------------------------------------------------
+
+
+def _acting(adj_row) -> str | None:
+    """The role acted in, if this is a higher-duties row with a real one."""
+    acting = str(adj_row["Acting role"]).strip()
+    if adj_row["Type"] == cfg.HIGHER_DUTIES and acting in cfg.ROLES and acting != cfg.NOT_ACTING:
+        return acting
+    return None
+
+
+def duty_hours_per_week(adj_row, role: str, fte_: float) -> float:
+    """Hours/week an adjustment takes out of teaching."""
+    acting = _acting(adj_row)
+    if acting:
+        own, act = weekly_di(role), weekly_di(acting)
+        if own is not None and act is not None:
+            return max(0.0, own - act) * fte_
+    return num(adj_row["DI relief hrs/wk"])
+
+
+def describe_adjustment(a) -> str:
+    acting = _acting(a)
+    what = f"Acting {acting}" if acting else f"{a['Type']} {num(a['DI relief hrs/wk']):g}h/wk"
+    where = a["Session"] + (f" B{a['Block']}" if str(a["Block"]).strip() not in ("", cfg.ALL_BLOCKS) else "")
+    weeks = f", {num(a['Weeks']):g} wk" if num(a["Weeks"]) > 0 else ""
+    return f"{what} ({where}{weeks})"
+
+
+def status(total: float, target: float | None) -> str:
+    if target is None:
+        return STATUS_CASUAL
+    band = target * cfg.ON_TRACK_TOLERANCE
+    if total > target + band + 1e-9:
+        return STATUS_OVER
+    if total < target - band - 1e-9:
+        return STATUS_UNDER
+    return STATUS_ON
+
+
+def person_year(
     staff: dict,
     allocations: pd.DataFrame,
     adjustments: pd.DataFrame,
-    session: str,
+    blocks: list[dict],
+    as_at: pd.Timestamp,
 ) -> dict:
-    """Everything the dashboard shows for one person in one session.
-
-    `allocations` / `adjustments` may be the whole tables; they're filtered here."""
+    """Everything the dashboard shows for one person over the year whose
+    Calendar blocks are `blocks`. The tables may be whole; they're filtered here."""
     name = staff["Staff"]
+    role = staff.get("Role", "")
     f = fte(staff.get("FTE"))
-    base = role_limit(staff.get("Role", ""), f)
+    sessions = {b["Session"] for b in blocks}
 
-    alloc = allocations[(allocations["Staff"] == name) & (allocations["Session"] == session)]
-    adj = adjustments[(adjustments["Staff"] == name) & (adjustments["Session"] == session)]
+    alloc = allocations[(allocations["Staff"] == name) & allocations["Session"].isin(sessions)]
+    adj = adjustments[(adjustments["Staff"] == name) & adjustments["Session"].isin(sessions)]
 
-    loads, limits, acting = {}, {}, set()
-    for b in cfg.BLOCKS:
-        loads[b] = sum(num(h) for h, lb in zip(alloc["DI hrs/wk"], alloc["Block"]) if in_block(lb, b))
-        limit = base
-        relief = 0.0
-        for _, a in adj.iterrows():
+    teaching = teaching_done = duties = duties_done = 0.0
+    by_discipline: dict[str, float] = {}
+    by_session: dict[str, float] = {s: 0.0 for s in cfg.SESSIONS}
+    for blk in blocks:
+        s, b, w = blk["Session"], blk["Block"], blk["weeks"]
+        done = elapsed_weeks(blk["start"], w, as_at)
+        sname = s.partition(" ")[2]
+        for _, r in alloc[alloc["Session"] == s].iterrows():
+            if not in_block(r["Block"], b):
+                continue
+            h = num(r["DI hrs/wk"])
+            teaching += h * w
+            teaching_done += h * done
+            d = r["Discipline"] or "(none)"
+            by_discipline[d] = by_discipline.get(d, 0.0) + h * w
+            by_session[sname] += h * w
+        for _, a in adj[adj["Session"] == s].iterrows():
             if not in_block(a["Block"], b):
                 continue
-            if a["Type"] == cfg.HIGHER_DUTIES and a["Acting role"] in cfg.ROLES:
-                limit = role_limit(a["Acting role"], f)
-                acting.add(a["Acting role"])
-            else:
-                relief += num(a["DI relief hrs/wk"])
-        limits[b] = None if limit is None else max(0.0, limit - relief)
+            aw = min(num(a["Weeks"]), w) if num(a["Weeks"]) > 0 else w
+            h = duty_hours_per_week(a, role, f)
+            duties += h * aw
+            duties_done += h * min(done, aw)
+            by_session[sname] += h * aw
 
-    avg_load = sum(loads.values()) / len(cfg.BLOCKS)
-    by_discipline: dict[str, float] = {}
-    for _, r in alloc.iterrows():
-        share = sum(in_block(r["Block"], b) for b in cfg.BLOCKS) / len(cfg.BLOCKS)
-        d = r["Discipline"] or "(none)"
-        by_discipline[d] = by_discipline.get(d, 0.0) + num(r["DI hrs/wk"]) * share
-
-    out = {
+    total = teaching + duties
+    to_date = teaching_done + duties_done
+    weeks = sum(b["weeks"] for b in blocks)
+    target = annual_target(role, f)
+    return {
         "Staff": name,
-        "Role": staff.get("Role", ""),
+        "Role": role,
         "FTE": f,
         "Supervisor": staff.get("Supervisor", ""),
-        **{f"B{b}": loads[b] for b in cfg.BLOCKS},
-        "Avg load": avg_load,
+        "Status": status(total, target),
+        "Target": target,
+        "Teaching": teaching,
+        "Duties": duties,
+        "Total": total,
+        "Variance": None if target is None else total - target,
+        "To date": to_date,
+        "Left": None if target is None else target - to_date,
+        "Avg hrs/wk": total / weeks if weeks else 0.0,
+        **{s: by_session[s] for s in cfg.SESSIONS},
         "by_discipline": by_discipline,
         "Disciplines": " · ".join(
             f"{d} {h:g}h" for d, h in sorted(by_discipline.items(), key=lambda kv: -kv[1])
         ),
-        "Acting": ", ".join(sorted(acting)),
-        "Adjustments": "; ".join(
-            f"{a['Type']}"
-            + (f" as {a['Acting role']}" if a["Type"] == cfg.HIGHER_DUTIES else f" −{num(a['DI relief hrs/wk']):g}h")
-            + (f" (block {a['Block']})" if a["Block"] not in ("", cfg.ALL_BLOCKS) else "")
-            for _, a in adj.iterrows()
-        ),
+        "Acting": ", ".join(sorted({a for a in (_acting(r) for _, r in adj.iterrows()) if a})),
+        "Adjustments": "; ".join(describe_adjustment(a) for _, a in adj.iterrows()),
     }
 
-    if any(v is None for v in limits.values()):
-        out.update({"Limit": None, "Spare": None, "Used %": None, "Status": STATUS_CASUAL,
-                    "Over blocks": ""})
-        return out
 
-    avg_limit = sum(limits.values()) / len(cfg.BLOCKS)
-    over_blocks = [b for b in cfg.BLOCKS if loads[b] > limits[b] + 1e-9]
-    spare = avg_limit - avg_load
-    if avg_load > avg_limit + 1e-9:
-        status = STATUS_OVER
-    elif over_blocks:
-        status = STATUS_PEAK
-    elif spare <= cfg.FULL_WITHIN_HOURS:
-        status = STATUS_FULL
-    else:
-        status = STATUS_SPARE
-    out.update({
-        "Limit": avg_limit,
-        "Spare": spare,
-        "Used %": (avg_load / avg_limit * 100) if avg_limit else (0.0 if not avg_load else 999.0),
-        "Status": status,
-        "Over blocks": ", ".join(over_blocks),
-    })
-    return out
-
-
-def summarise(
+def summarise_year(
     staff: pd.DataFrame,
     allocations: pd.DataFrame,
     adjustments: pd.DataFrame,
-    session: str,
+    calendar: pd.DataFrame,
+    yy: str,
+    as_at: pd.Timestamp,
 ) -> pd.DataFrame:
-    """One row per active staff member for the session."""
+    """One row per active staff member for the year."""
+    blocks = calendar_blocks(calendar, yy)
     active = staff[staff["Active"].str.upper() != "FALSE"]
-    rows = [person_session(s, allocations, adjustments, session) for s in active.to_dict("records")]
+    rows = [person_year(s, allocations, adjustments, blocks, as_at) for s in active.to_dict("records")]
     return pd.DataFrame(rows)
-
-
-def year_average(staff_row: dict, allocations: pd.DataFrame, adjustments: pd.DataFrame, yy: str) -> tuple[float, float | None]:
-    """(avg load, avg limit) over the year's sessions that have any allocation
-    for this person — the Sch B 2.9 "averages out over the academic year" view."""
-    sessions = sorted(
-        {s for s in allocations.loc[allocations["Staff"] == staff_row["Staff"], "Session"]
-         if str(s).startswith(f"{yy} ")},
-        key=session_sort_key,
-    )
-    if not sessions:
-        return 0.0, None
-    per = [person_session(staff_row, allocations, adjustments, s) for s in sessions]
-    if any(p["Limit"] is None for p in per):
-        return sum(p["Avg load"] for p in per) / len(per), None
-    return (
-        sum(p["Avg load"] for p in per) / len(per),
-        sum(p["Limit"] for p in per) / len(per),
-    )
 
 
 def orphans(staff: pd.DataFrame, table: pd.DataFrame) -> list[str]:

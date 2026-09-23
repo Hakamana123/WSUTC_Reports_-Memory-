@@ -17,8 +17,8 @@ Select a tool from the sidebar:
 
 - **🧭 IA Mapping** — review assessment tasks on the Inspire × Assure axes,
   derive a quadrant and a sequence-aware redesign action, confirm and export.
-- **📋 Workload Management** — teaching load in hours per staff member,
-  against The College EA limits, with a dashboard for supervisors.
+- **📋 Workload Management** — each staff member's year in hours (teaching
+  plus higher / other duties) against their annual target, for supervisors.
 
 All changes save to one shared Google Sheet — see `SETUP_GOOGLE_SHEET.md` if
 this is the first run.
