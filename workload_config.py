@@ -75,6 +75,11 @@ SESSION_BLOCKS: dict[str, list[str]] = {"AUT": ["1", "2", "3", "4"], "SPR": ["1"
 # Known block dates: (session, block) -> (start Monday, teaching weeks). The
 # Calendar tab's button fills these in; the Calendar itself is what counts.
 BLOCK_DATES: dict[tuple[str, str], tuple[str, int]] = {
+    ("26 SUM", "2"): ("2026-01-12", 4),
+    ("26 AUT", "1"): ("2026-03-02", 4),
+    ("26 AUT", "2"): ("2026-03-30", 4),
+    ("26 AUT", "3"): ("2026-05-04", 4),
+    ("26 AUT", "4"): ("2026-06-01", 4),
     ("26 SPR", "1"): ("2026-07-20", 4),
     ("26 SPR", "2"): ("2026-08-17", 4),
     ("26 SPR", "3"): ("2026-09-21", 4),

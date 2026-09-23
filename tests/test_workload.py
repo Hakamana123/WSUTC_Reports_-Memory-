@@ -262,13 +262,20 @@ def test_calendar_fill_adds_the_years_blocks_with_known_dates():
     assert len(new) == 4 + 3 + 2
     assert got[("26 SPR", "2")] == ("2026-08-17", "4")
     assert got[("26 SUM", "1")] == ("2026-11-23", "4")
-    assert got[("26 AUT", "1")] == ("", "")                      # not on file
+    assert got[("26 AUT", "1")] == ("2026-03-02", "4")
+    assert got[("26 SUM", "2")] == ("2026-01-12", "4")
     assert list(fills.values()) == [{"Start date": "2026-07-20", "Teaching weeks": "4"}]
 
 
 def test_known_2027_calendar_is_36_weeks_before_summer_block_1():
     new, _ = rules.calendar_fill(cal({"Session": "26 AUT", "Block": "1"}).iloc[0:0], "27")
     assert sum(int(r["Teaching weeks"] or 0) for r in new) == 36   # SUM B2 + AUT 1-4 + SPR 1-4
+
+
+def test_2026_calendar_on_file_is_all_ten_blocks():
+    new, _ = rules.calendar_fill(cal({"Session": "26 AUT", "Block": "1"}).iloc[0:0], "26")
+    assert len(new) == 10 and all(r["Start date"] for r in new)
+    assert sum(int(r["Teaching weeks"]) for r in new) == 40
 
 
 def test_summer_all_block_only_needs_its_two_blocks():
