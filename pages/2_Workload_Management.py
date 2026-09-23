@@ -66,8 +66,14 @@ DATE = {"Start date"}
 
 
 @st.cache_resource(show_spinner=False)
-def _backends():
+def _cached_backends(tables: tuple[str, ...]):  # noqa: ARG001 — cache key only
     return wstore.backends_from_secrets(st.secrets)
+
+
+def _backends():
+    # keyed on the table names, so an update that adds a tab gets a fresh set
+    # instead of the one cached by the old code
+    return _cached_backends(tuple(wstore.TABLES))
 
 
 def _reload():
