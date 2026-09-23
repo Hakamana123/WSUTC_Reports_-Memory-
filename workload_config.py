@@ -50,6 +50,11 @@ ACTING_ROLES: list[str] = [NOT_ACTING, "Subject Coordinator", "Program Coordinat
 # A full-time Teacher's year: 16 DI hrs/wk × 36 teaching weeks = 576 h. The
 # annual target for anyone is their role's hrs/wk × FTE × this. Block dates
 # and lengths come from the Calendar tab.
+#
+# Fixed (confirmed by Josiah, 2026-09-23): a calendar year has 10 four-week
+# blocks — Summer B2 (Jan), Autumn 1–4, Spring 1–4, Summer B1 (Nov) — i.e.
+# 40 teaching weeks, but nobody teaches every block, so the target stays
+# 576 h. Teaching all 10 blocks at 16 h shows as over.
 ANNUAL_WEEKS: float = 36
 
 # Projected year total within this fraction of the target = on track.

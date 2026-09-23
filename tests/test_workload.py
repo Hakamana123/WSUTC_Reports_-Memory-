@@ -125,7 +125,7 @@ def test_block_line_counts_only_in_its_block_and_uses_calendar_weeks():
                {"Staff": "Ana", "Block": "2", "DI hrs/wk": "2"})
     p = person("Ana", st_, al, calendar=c)
     assert p["Teaching"] == 10 * 9 + 2 * 4
-    assert p["Avg hrs/wk"] == pytest.approx(98 / 9)
+    assert p["Avg hrs/wk"] == pytest.approx(98 / 36)   # always over the target's 36 weeks
 
 
 def test_blocks_missing_from_the_calendar_count_zero_and_are_reported():

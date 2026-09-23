@@ -251,7 +251,6 @@ def person_year(
 
     total = teaching + duties
     to_date = teaching_done + duties_done
-    weeks = sum(b["weeks"] for b in blocks)
     target = annual_target(role, f)
     return {
         "Staff": name,
@@ -266,7 +265,7 @@ def person_year(
         "Variance": None if target is None else total - target,
         "To date": to_date,
         "Left": None if target is None else target - to_date,
-        "Avg hrs/wk": total / weeks if weeks else 0.0,
+        "Avg hrs/wk": total / cfg.ANNUAL_WEEKS,
         **{s: by_session[s] for s in cfg.SESSIONS},
         "by_discipline": by_discipline,
         "Disciplines": " · ".join(

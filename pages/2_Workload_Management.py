@@ -398,8 +398,8 @@ with tab_dash:
                 "Left": hours("Left (h)", "Target − to date: hours still to reach the target by year end."),
                 "Avg hrs/wk": st.column_config.NumberColumn(
                     "Avg hrs/wk", format="%.1f",
-                    help=f"Total ÷ the {cfg.ANNUAL_WEEKS if not cal_weeks else cal_weeks:g} teaching "
-                    "weeks in the Calendar.",
+                    help=f"Total ÷ {cfg.ANNUAL_WEEKS:g} weeks — comparable with the role's "
+                    "DI hrs/wk (16 for a full-time Teacher).",
                 ),
                 **{s: hours(f"{s} (h)", f"Teaching + duties in {yy} {s}.") for s in cfg.SESSIONS},
                 "Disciplines": st.column_config.TextColumn(width="medium"),
@@ -444,9 +444,9 @@ with tab_dash:
     if gaps:
         st.warning("Teaching or duties in blocks with no teaching weeks in the 📅 Calendar "
                    "(counted as zero): " + ", ".join(gaps))
-    if blocks and abs(cal_weeks - cfg.ANNUAL_WEEKS) > 1e-9:
-        st.info(f"The 📅 Calendar has {cal_weeks:g} teaching weeks in 20{yy}; targets assume "
-                f"{cfg.ANNUAL_WEEKS:g}.")
+    if blocks and cal_weeks < cfg.ANNUAL_WEEKS - 1e-9:
+        st.info(f"The 📅 Calendar has only {cal_weeks:g} teaching weeks in 20{yy} — fewer than the "
+                f"{cfg.ANNUAL_WEEKS:g} the target assumes, so some blocks are probably missing.")
     missing = rules.orphans(staff_df, alloc_df) + rules.orphans(staff_df, adj_df)
     if missing:
         st.warning("Teaching or duties for people not on the Staff list: "
@@ -559,11 +559,11 @@ with tab_cal:
     st.caption(
         f"Each block of 20{yy}: when it starts and how many teaching weeks it has. Hours are "
         "DI hrs/wk × these weeks, and 'to date' counts the weeks up to the As at date. "
-        f"The annual target assumes {cfg.ANNUAL_WEEKS:g} teaching weeks."
+        f"The target stays {cfg.ANNUAL_WEEKS:g} weeks' worth however many blocks the year has — "
+        "nobody teaches every block. Breaks between blocks simply aren't listed."
     )
     c1, c2 = st.columns([1, 3])
-    c1.metric("Teaching weeks", f"{cal_weeks:g}", delta=f"{cal_weeks - cfg.ANNUAL_WEEKS:+g} vs target"
-              if cal_weeks and cal_weeks != cfg.ANNUAL_WEEKS else None, delta_color="off")
+    c1.metric("Teaching weeks", f"{cal_weeks:g}")
     new_blocks, fills = rules.calendar_fill(cal_df, yy)
     if (new_blocks or fills) and c2.button(
         f"➕ Add the year's blocks, with the known dates ({len(new_blocks)} new, {len(fills)} to fill in)",
