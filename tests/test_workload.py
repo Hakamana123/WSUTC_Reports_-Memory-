@@ -248,10 +248,33 @@ def test_orphans_lists_names_not_on_the_staff_list():
 
 @pytest.mark.parametrize(
     "date, expected",
-    [("2026-03-10", "26 AUT"), ("2026-09-19", "26 SPR"), ("2026-12-05", "27 SUM"), ("2027-01-10", "27 SUM")],
+    [("2026-03-10", "26 AUT"), ("2026-09-19", "26 SPR"), ("2026-12-05", "26 SUM"),
+     ("2027-01-10", "27 SUM"), ("2027-02-03", "27 SUM")],
 )
 def test_default_session(date, expected):
     assert rules.default_session(pd.Timestamp(date)) == expected
+
+
+def test_calendar_fill_adds_the_years_blocks_with_known_dates():
+    new, fills = rules.calendar_fill(cal({"Session": "26 SPR", "Block": "1", "Teaching weeks": ""}), "26")
+    got = {(r["Session"], r["Block"]): (r["Start date"], r["Teaching weeks"]) for r in new}
+    # AUT 1-4, SPR 2-4, SUM 1-2 — summer has two blocks
+    assert len(new) == 4 + 3 + 2
+    assert got[("26 SPR", "2")] == ("2026-08-17", "4")
+    assert got[("26 SUM", "1")] == ("2026-11-23", "4")
+    assert got[("26 AUT", "1")] == ("", "")                      # not on file
+    assert list(fills.values()) == [{"Start date": "2026-07-20", "Teaching weeks": "4"}]
+
+
+def test_known_2027_calendar_is_36_weeks_before_summer_block_1():
+    new, _ = rules.calendar_fill(cal({"Session": "26 AUT", "Block": "1"}).iloc[0:0], "27")
+    assert sum(int(r["Teaching weeks"] or 0) for r in new) == 36   # SUM B2 + AUT 1-4 + SPR 1-4
+
+
+def test_summer_all_block_only_needs_its_two_blocks():
+    c = cal({"Session": "26 SUM", "Block": "1"}, {"Session": "26 SUM", "Block": "2"})
+    al = alloc({"Staff": "Ana", "Session": "26 SUM", "DI hrs/wk": "10"})
+    assert rules.calendar_gaps(al, adj().iloc[0:0], c, "26") == []
 
 
 def test_session_sort_order():

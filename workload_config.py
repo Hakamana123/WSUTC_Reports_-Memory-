@@ -56,11 +56,35 @@ ANNUAL_WEEKS: float = 36
 ON_TRACK_TOLERANCE: float = 0.05
 
 # --- Sessions ----------------------------------------------------------------
-# Same naming as WSTUCReports: "26 AUT", "26 SPR", "26 SUM"; four blocks each.
+# Same naming as WSTUCReports: "26 AUT", "26 SPR", "26 SUM".
 SESSIONS: list[str] = ["AUT", "SPR", "SUM"]
 BLOCKS: list[str] = ["1", "2", "3", "4"]
 ALL_BLOCKS = "All"
 BLOCK_OPTIONS: list[str] = [ALL_BLOCKS] + BLOCKS
+
+# Blocks each session has. Summer is labelled by calendar year: "26 SUM"
+# block 1 runs Nov–Dec 2026, "27 SUM" block 2 Jan–Feb 2027.
+SESSION_BLOCKS: dict[str, list[str]] = {"AUT": ["1", "2", "3", "4"], "SPR": ["1", "2", "3", "4"],
+                                        "SUM": ["1", "2"]}
+
+# Known block dates: (session, block) -> (start Monday, teaching weeks). The
+# Calendar tab's button fills these in; the Calendar itself is what counts.
+BLOCK_DATES: dict[tuple[str, str], tuple[str, int]] = {
+    ("26 SPR", "1"): ("2026-07-20", 4),
+    ("26 SPR", "2"): ("2026-08-17", 4),
+    ("26 SPR", "3"): ("2026-09-21", 4),
+    ("26 SPR", "4"): ("2026-10-19", 4),
+    ("26 SUM", "1"): ("2026-11-23", 4),
+    ("27 SUM", "2"): ("2027-01-11", 4),
+    ("27 AUT", "1"): ("2027-03-01", 4),
+    ("27 AUT", "2"): ("2027-03-29", 4),
+    ("27 AUT", "3"): ("2027-05-03", 4),
+    ("27 AUT", "4"): ("2027-05-31", 4),
+    ("27 SPR", "1"): ("2027-07-19", 4),
+    ("27 SPR", "2"): ("2027-08-16", 4),
+    ("27 SPR", "3"): ("2027-09-20", 4),
+    ("27 SPR", "4"): ("2027-10-18", 4),
+}
 
 # --- Disciplines -------------------------------------------------------------
 # Starting list only — anything already in the Sheet is offered as well.

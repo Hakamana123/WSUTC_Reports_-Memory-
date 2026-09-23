@@ -564,10 +564,18 @@ with tab_cal:
     c1, c2 = st.columns([1, 3])
     c1.metric("Teaching weeks", f"{cal_weeks:g}", delta=f"{cal_weeks - cfg.ANNUAL_WEEKS:+g} vs target"
               if cal_weeks and cal_weeks != cfg.ANNUAL_WEEKS else None, delta_color="off")
-    have = {(s, str(b)) for s, b in zip(cal_df["Session"], cal_df["Block"])}
-    todo = [(s, b) for s in year_sessions for b in cfg.BLOCKS if (s, b) not in have]
-    if todo and c2.button(f"➕ Add the {len(todo)} missing block(s) of 20{yy}"):
-        _add_rows(CALENDAR, [{"ID": wstore.new_id(), "Session": s, "Block": b} for s, b in todo])
+    new_blocks, fills = rules.calendar_fill(cal_df, yy)
+    if (new_blocks or fills) and c2.button(
+        f"➕ Add the year's blocks, with the known dates ({len(new_blocks)} new, {len(fills)} to fill in)",
+        help="Adds any of the year's blocks not yet listed, and fills blank start dates / weeks "
+        "from the dates on file. Nothing is saved until you press Save.",
+    ):
+        for rid, vals in fills.items():
+            for c, v in vals.items():
+                cal_df.loc[cal_df["ID"] == rid, c] = v
+        pending[CALENDAR.name]["changed"] |= set(fills)
+        _add_rows(CALENDAR, [{"ID": wstore.new_id(), **r} for r in new_blocks])
+        _bump()
         st.rerun()
     vis = _year_rows(cal_df)
     vis = vis.assign(_s=vis["Session"].map(rules.session_sort_key)).sort_values(["_s", "Block"]).drop(columns="_s")

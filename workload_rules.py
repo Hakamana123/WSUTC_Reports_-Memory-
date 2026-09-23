@@ -88,13 +88,37 @@ def in_year(session, yy: str) -> bool:
 
 
 def default_session(today: pd.Timestamp | None = None) -> str:
-    """Autumn Feb–Jun, Spring Jul–Nov, Summer Dec–Jan."""
+    """Summer Dec–Feb, Autumn Mar–Jun, Spring Jul–Nov. Summer is labelled by
+    calendar year (Dec 2026 → 26 SUM, Jan 2027 → 27 SUM)."""
     t = today or pd.Timestamp.today()
-    if t.month >= 12:
-        return session_of(t.year + 1, "SUM")   # summer belongs to the coming year
-    if t.month == 1:
+    if t.month >= 12 or t.month <= 2:
         return session_of(t.year, "SUM")
     return session_of(t.year, "AUT" if t.month <= 6 else "SPR")
+
+
+def calendar_fill(calendar: pd.DataFrame, yy: str) -> tuple[list[dict], dict[str, dict]]:
+    """What the Calendar button does for year `yy`: (new rows for the year's
+    blocks not yet in the Calendar, {ID: values} for existing rows whose start
+    date or weeks are blank and are in cfg.BLOCK_DATES). Not saved."""
+    have = {(s, str(b).strip()): i for i, s, b in zip(calendar["ID"], calendar["Session"], calendar["Block"])}
+    new, updates = [], {}
+    for s in year_sessions(yy):
+        for b in cfg.SESSION_BLOCKS[s.partition(" ")[2]]:
+            start, weeks = cfg.BLOCK_DATES.get((s, b), ("", ""))
+            if (s, b) not in have:
+                new.append({"Session": s, "Block": b, "Start date": start, "Teaching weeks": str(weeks)})
+    for _, r in calendar[calendar["Session"].map(lambda s: in_year(s, yy))].iterrows():
+        known = cfg.BLOCK_DATES.get((r["Session"], str(r["Block"]).strip()))
+        if not known:
+            continue
+        vals = {}
+        if not str(r["Start date"]).strip():
+            vals["Start date"] = known[0]
+        if not str(r["Teaching weeks"]).strip():
+            vals["Teaching weeks"] = str(known[1])
+        if vals:
+            updates[r["ID"]] = vals
+    return new, updates
 
 
 def session_sort_key(s: str) -> tuple[int, int]:
@@ -135,7 +159,8 @@ def calendar_gaps(allocations: pd.DataFrame, adjustments: pd.DataFrame,
     for t in (allocations, adjustments):
         for s, b in zip(t["Session"], t["Block"]):
             if in_year(s, yy):
-                for blk in (cfg.BLOCKS if str(b).strip() in ("", cfg.ALL_BLOCKS) else [str(b).strip()]):
+                every = cfg.SESSION_BLOCKS.get(str(s).partition(" ")[2], cfg.BLOCKS)
+                for blk in (every if str(b).strip() in ("", cfg.ALL_BLOCKS) else [str(b).strip()]):
                     used.add((s, blk))
     return [f"{s} B{b}" for s, b in sorted(used - have, key=lambda sb: (session_sort_key(sb[0]), sb[1]))]
 
