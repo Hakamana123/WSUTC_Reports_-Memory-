@@ -213,12 +213,15 @@ def person_year(
     adjustments: pd.DataFrame,
     blocks: list[dict],
     as_at: pd.Timestamp,
+    plan: dict | None = None,
 ) -> dict:
     """Everything the dashboard shows for one person over the year whose
-    Calendar blocks are `blocks`. The tables may be whole; they're filtered here."""
+    Calendar blocks are `blocks`. The tables may be whole; they're filtered here.
+    `plan` is their Year plan row for that year, if any."""
     name = staff["Staff"]
     role = staff.get("Role", "")
     f = fte(staff.get("FTE"))
+    plan = plan or {}
     sessions = {b["Session"] for b in blocks}
 
     alloc = allocations[(allocations["Staff"] == name) & allocations["Session"].isin(sessions)]
@@ -249,9 +252,17 @@ def person_year(
             duties_done += h * min(done, aw)
             by_session[sname] += h * aw
 
-    total = teaching + duties
-    to_date = teaching_done + duties_done
-    target = annual_target(role, f)
+    # hours allocated outside the teaching lines (e.g. imported from the load
+    # tracking spreadsheet) have no dates, so "to date" takes the share of
+    # the year's teaching weeks that has passed
+    other = num(plan.get("Other allocated (h)"))
+    year_weeks = sum(b["weeks"] for b in blocks)
+    year_done = sum(elapsed_weeks(b["start"], b["weeks"], as_at) for b in blocks)
+    other_done = other * (year_done / year_weeks) if year_weeks else 0.0
+
+    total = teaching + duties + other
+    to_date = teaching_done + duties_done + other_done
+    target = plan_target(plan, role, f)
     return {
         "Staff": name,
         "Role": role,
@@ -261,6 +272,7 @@ def person_year(
         "Target": target,
         "Teaching": teaching,
         "Duties": duties,
+        "Other": other,
         "Total": total,
         "Variance": None if target is None else total - target,
         "To date": to_date,
@@ -273,7 +285,31 @@ def person_year(
         ),
         "Acting": ", ".join(sorted({a for a in (_acting(r) for _, r in adj.iterrows()) if a})),
         "Adjustments": "; ".join(describe_adjustment(a) for _, a in adj.iterrows()),
+        "Plan": plan.get("Plan", ""),
+        "Summer hrs needed": num(plan.get("Summer hrs needed")) or None,
+        "Likelihood": plan.get("Likelihood", ""),
+        "Plan subject": plan.get("Subject", ""),
+        "Plan notes": plan.get("Notes", ""),
     }
+
+
+def plan_target(plan: dict, role: str, fte_: float) -> float | None:
+    """The Year plan's target if one is entered (0 counts — e.g. on leave all
+    year), otherwise role × FTE × 36."""
+    if str(plan.get("Target (h)", "")).strip():
+        return num(plan["Target (h)"])
+    return annual_target(role, fte_)
+
+
+def year_label(yy: str) -> str:
+    """"26" → "2026", the Year plan's Year column."""
+    return f"20{yy}"
+
+
+def plans_by_staff(plans: pd.DataFrame, yy: str) -> dict[str, dict]:
+    """{name: Year plan row} for the year; the last row wins if someone has two."""
+    rows = plans[plans["Year"].astype(str).str.strip() == year_label(yy)]
+    return {r["Staff"]: r for r in rows.to_dict("records")}
 
 
 def summarise_year(
@@ -283,11 +319,14 @@ def summarise_year(
     calendar: pd.DataFrame,
     yy: str,
     as_at: pd.Timestamp,
+    plans: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """One row per active staff member for the year."""
     blocks = calendar_blocks(calendar, yy)
+    by_name = {} if plans is None else plans_by_staff(plans, yy)
     active = staff[staff["Active"].str.upper() != "FALSE"]
-    rows = [person_year(s, allocations, adjustments, blocks, as_at) for s in active.to_dict("records")]
+    rows = [person_year(s, allocations, adjustments, blocks, as_at, by_name.get(s["Staff"]))
+            for s in active.to_dict("records")]
     return pd.DataFrame(rows)
 
 

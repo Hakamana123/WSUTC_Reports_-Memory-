@@ -29,16 +29,17 @@ import auth
 import store
 import workload_config as cfg
 import workload_rules as rules
+import workload_import as wimport
 import workload_store as wstore
 
 # Streamlit Cloud pulls a new commit without restarting Python: this page is
 # re-read from disk every run, but helper modules imported before the pull
 # (store.py, via IA Mapping) stay as the old code until the app is rebooted.
 # Reload them, in dependency order, so a push always takes effect here.
-for _m in (store, cfg, rules, wstore):
+for _m in (store, cfg, rules, wstore, wimport):
     importlib.reload(_m)
 
-from workload_store import ADJUSTMENTS, ALLOCATIONS, CALENDAR, STAFF  # noqa: E402
+from workload_store import ADJUSTMENTS, ALLOCATIONS, CALENDAR, PLANS, STAFF  # noqa: E402
 
 st.set_page_config(page_title="Workload Management", page_icon="📋", layout="wide")
 auth.require_access()
@@ -55,7 +56,8 @@ st.caption(
     "Casual teachers have no target."
 )
 
-NUMERIC = {"FTE", "Classes", "DI hrs/wk", "DI relief hrs/wk", "Weeks", "Teaching weeks"}
+NUMERIC = {"FTE", "Classes", "DI hrs/wk", "DI relief hrs/wk", "Weeks", "Teaching weeks", "Target (h)",
+           "Other allocated (h)", "Summer hrs needed"}
 BOOL = {"Active"}
 DATE = {"Start date"}
 
@@ -104,7 +106,7 @@ if "wl_data" not in st.session_state or set(wstore.TABLES) - set(st.session_stat
 data: dict[str, pd.DataFrame] = st.session_state["wl_data"]
 pending: dict[str, dict[str, set]] = st.session_state["wl_pending"]
 staff_df, alloc_df, adj_df = data[STAFF.name], data[ALLOCATIONS.name], data[ADJUSTMENTS.name]
-cal_df = data[CALENDAR.name]
+cal_df, plans_df = data[CALENDAR.name], data[PLANS.name]
 
 
 def _fmt(v) -> str:
@@ -141,6 +143,7 @@ this_year = pd.Timestamp.today().year
 default_session = rules.default_session()
 years = sorted(
     {str(s).partition(" ")[0] for t in (alloc_df, adj_df, cal_df) for s in t["Session"] if s}
+    | {str(y).strip()[-2:] for y in plans_df["Year"] if str(y).strip()}
     | {f"{y % 100:02d}" for y in (this_year - 1, this_year, this_year + 1)}
 )
 
@@ -274,7 +277,7 @@ def edit_table(table, visible: pd.DataFrame, column_config: dict, order: list[st
 
     # a renamed staff member keeps their teaching and duties
     for old_name, new_name in renames.items():
-        for t in (ALLOCATIONS, ADJUSTMENTS):
+        for t in (ALLOCATIONS, ADJUSTMENTS, PLANS):
             tdf = data[t.name]
             hit = tdf["Staff"] == old_name
             if hit.any():
@@ -292,20 +295,22 @@ staff_names = sorted(n for n in staff_df["Staff"] if n)
 # --------------------------------------------------------------------------
 
 
-tab_dash, tab_teach, tab_adj, tab_cal, tab_staff, tab_hist = st.tabs(
-    ["📊 Dashboard", "📚 Teaching", "⬆ Higher duties & other duties", "📅 Calendar", "👥 Staff",
-     "🗂 History"]
+tab_dash, tab_teach, tab_adj, tab_plan, tab_cal, tab_staff, tab_hist = st.tabs(
+    ["📊 Dashboard", "📚 Teaching", "⬆ Higher duties & other duties", "🎯 Year plan", "📅 Calendar",
+     "👥 Staff", "🗂 History"]
 )
 
-# discipline colours, with HDA / other duties always the same grey
+# discipline colours; HDA / other duties and other allocated hours always the same greys
 _PALETTE = ["#4c78a8", "#f58518", "#e45756", "#72b7b2", "#54a24b", "#eeca3b", "#b279a2",
             "#ff9da6", "#9d755d"]
 _DUTIES_COLOUR = "#9e9e9e"
+_OTHER = "Other allocated"
+_OTHER_COLOUR = "#c7c7c7"
 
 
 # ---------------------------------------------------------------- dashboard
 with tab_dash:
-    summary = rules.summarise_year(staff_df, alloc_df, adj_df, cal_df, yy, as_at)
+    summary = rules.summarise_year(staff_df, alloc_df, adj_df, cal_df, yy, as_at, plans_df)
     if not summary.empty:
         summary = summary[summary["Staff"].isin(in_view)]
     blocks = rules.calendar_blocks(cal_df, yy)
@@ -330,7 +335,11 @@ with tab_dash:
         m[3].metric(rules.STATUS_UNDER, int(n.get(rules.STATUS_UNDER, 0)))
         m[4].metric(f"{rules.DUTIES} (h)", f"{summary['Duties'].sum():,.0f}",
                     help="Higher duties and other duties across everyone shown, for the year.")
-        m[5].metric("Across 2+ disciplines", int((summary["by_discipline"].apply(len) > 1).sum()))
+        summer = summary["Summer hrs needed"].fillna(0)
+        confirmed = summer[summary["Likelihood"] == "Confirmed"].sum()
+        m[5].metric("Summer hrs needed", f"{summer.sum():,.0f}",
+                    delta=f"{confirmed:,.0f} confirmed" if summer.sum() else None, delta_color="off",
+                    help="From the 🎯 Year plan: summer teaching hours needed to make up underloads.")
 
         status_filter = st.multiselect(
             "Show", rules.STATUSES, placeholder="Everyone — or pick a status",
@@ -345,9 +354,12 @@ with tab_dash:
         ] + [
             {"Staff": r["Staff"], "Part": rules.DUTIES, "Hours": r["Duties"]}
             for _, r in shown.iterrows() if r["Duties"]
+        ] + [
+            {"Staff": r["Staff"], "Part": _OTHER, "Hours": r["Other"]}
+            for _, r in shown.iterrows() if r["Other"]
         ]
         if long:
-            parts = sorted({x["Part"] for x in long} - {rules.DUTIES})
+            parts = sorted({x["Part"] for x in long} - {rules.DUTIES, _OTHER})
             colours = [_PALETTE[i % len(_PALETTE)] for i in range(len(parts))]
             y = alt.Y("Staff:N", sort=list(shown.sort_values("Total", ascending=False)["Staff"]),
                       title=None)
@@ -355,7 +367,8 @@ with tab_dash:
                 y=y,
                 x=alt.X("sum(Hours):Q", title=f"Hours in 20{yy} (projected)"),
                 color=alt.Color("Part:N", title=None,
-                                scale=alt.Scale(domain=parts + [rules.DUTIES], range=colours + [_DUTIES_COLOUR]),
+                                scale=alt.Scale(domain=parts + [rules.DUTIES, _OTHER],
+                                                range=colours + [_DUTIES_COLOUR, _OTHER_COLOUR]),
                                 legend=alt.Legend(orient="bottom")),
                 order=alt.Order("Part:N"),
                 tooltip=["Staff", alt.Tooltip("Part:N", title="Discipline / duties"),
@@ -371,7 +384,8 @@ with tab_dash:
             st.altair_chart(chart, use_container_width=True)
             st.caption(
                 "Bars: each person's projected year — teaching by discipline, then "
-                f"{rules.DUTIES} in grey. Black tick: annual target. ▼: hours to date "
+                f"{rules.DUTIES} in grey and {_OTHER.lower()} hours (🎯 Year plan) in light grey. "
+                "Black tick: annual target. ▼: hours to date "
                 f"(as at {as_at:%d/%m/%Y})."
             )
 
@@ -380,18 +394,25 @@ with tab_dash:
         table = shown.assign(_o=shown["Status"].map(order)).sort_values(["_o", "Staff"])
         hours = lambda label, help_: st.column_config.NumberColumn(label, format="%.0f", help=help_)  # noqa: E731
         st.dataframe(
-            table[["Status", "Staff", "Role", "FTE", "Target", "Teaching", "Duties", "Total", "Variance",
-                   "To date", "Left", "Avg hrs/wk", *cfg.SESSIONS, "Disciplines", "Adjustments",
-                   "Supervisor"]],
+            table[["Status", "Staff", "Role", "FTE", "Target", "Teaching", "Duties", "Other", "Total",
+                   "Variance", "To date", "Left", "Avg hrs/wk", "Plan", "Summer hrs needed", "Likelihood",
+                   *cfg.SESSIONS, "Disciplines", "Adjustments", "Supervisor"]],
             hide_index=True,
             use_container_width=True,
             column_config={
-                "Target": hours("Target (h)", f"Role DI hrs/wk × FTE × {cfg.ANNUAL_WEEKS:g} weeks."),
+                "Target": hours("Target (h)", f"The 🎯 Year plan's target if set, otherwise role DI hrs/wk "
+                                f"× FTE × {cfg.ANNUAL_WEEKS:g} weeks."),
+                "Other": hours("Other allocated (h)", "Hours allocated outside the teaching lines — e.g. "
+                               "imported from the load tracking spreadsheet (🎯 Year plan)."),
+                "Plan": st.column_config.TextColumn("Plan?", width="small",
+                                                    help="Articulated plan if underloaded (🎯 Year plan)."),
+                "Summer hrs needed": hours("Summer hrs needed", "From the 🎯 Year plan."),
                 "Teaching": hours("Teaching (h)", "DI hrs/wk × the teaching weeks of each block, every "
                                   "discipline and session added up."),
                 "Duties": hours(f"{rules.DUTIES} (h)", "Higher duties (the DI hours an acting role "
                                 "doesn't teach) plus other duties, for the weeks they cover."),
-                "Total": hours("Total (h)", "Projected year: teaching + HDA / other duties."),
+                "Total": hours("Total (h)", "Projected year: teaching + HDA / other duties + other "
+                               "allocated."),
                 "Variance": hours("± Target (h)", "Total − target. Positive = over."),
                 "To date": hours("To date (h)", "Teaching + duties in the teaching weeks up to the "
                                  "'As at' date."),
@@ -447,7 +468,8 @@ with tab_dash:
     if blocks and cal_weeks < cfg.ANNUAL_WEEKS - 1e-9:
         st.info(f"The 📅 Calendar has only {cal_weeks:g} teaching weeks in 20{yy} — fewer than the "
                 f"{cfg.ANNUAL_WEEKS:g} the target assumes, so some blocks are probably missing.")
-    missing = rules.orphans(staff_df, alloc_df) + rules.orphans(staff_df, adj_df)
+    missing = (rules.orphans(staff_df, alloc_df) + rules.orphans(staff_df, adj_df)
+               + rules.orphans(staff_df, plans_df))
     if missing:
         st.warning("Teaching or duties for people not on the Staff list: "
                    + ", ".join(sorted(set(missing))))
@@ -554,6 +576,91 @@ with tab_adj:
     ) + " (full-time; × FTE).")
 
 
+# ---------------------------------------------------------------- year plan
+def _update_rows(table, updates: dict[str, dict]) -> None:
+    df = data[table.name]
+    for rid, vals in updates.items():
+        for c, v in vals.items():
+            df.loc[df["ID"] == rid, c] = v
+    pending[table.name]["changed"] |= set(updates)
+
+
+with tab_plan:
+    year = rules.year_label(yy)
+    st.caption(
+        f"One row per person for {year}, all optional. **Target** replaces role × FTE × "
+        f"{cfg.ANNUAL_WEEKS:g} weeks (part-year contracts, leave — 0 counts). **Other allocated** "
+        "counts hours not entered as 📚 Teaching lines, e.g. the spreadsheet's allocated hours — "
+        "don't enter the same teaching both ways. The rest records how an underload will be made up."
+    )
+
+    with st.expander("⬆ Import the L&T load tracking spreadsheet"):
+        st.caption(
+            f"Reads the main sheet and the underload sheet into **{year}**: adds anyone not yet on "
+            "👥 Staff (matched by Employee No, then name — existing people keep their role, FTE and "
+            "supervisor), and sets each person's Year plan from it: target = required load, other "
+            "allocated = allocated hours, plus plan, summer hours, likelihood, subject and details. "
+            "Re-importing a newer version refreshes those fields. Nothing is saved until you press Save."
+        )
+        up = st.file_uploader("Load tracking spreadsheet (.xlsx)", type=["xlsx"], key="wl_import_file")
+        if up is not None:
+            parsed = wimport.parse_workbook(up)
+            ch = wimport.plan_changes(parsed, staff_df, plans_df, year)
+            for w in parsed.warnings:
+                st.warning(w)
+            i1, i2, i3, i4 = st.columns(4)
+            i1.metric("People in the file", len(parsed.people))
+            i2.metric("New staff", len(ch.new_staff))
+            i3.metric(f"New {year} plans", len(ch.new_plans))
+            i4.metric("Updates", len(ch.staff_updates) + len(ch.plan_updates))
+            st.dataframe(
+                pd.DataFrame([{
+                    "Name": p["name"], "Employee No": p["emp"], "Unit": p["unit"], "Required": p["required"],
+                    "Allocated": p["allocated"], "Plan": p["plan"], "Summer hrs": p["summer"],
+                    "Likelihood": p["likelihood"], "Subject": p["subject"], "Details": p["details"],
+                } for p in parsed.people]),
+                hide_index=True, use_container_width=True, height=250,
+            )
+            n_changes = (len(ch.new_staff) + len(ch.new_plans) + len(ch.staff_updates)
+                         + len(ch.plan_updates))
+            if st.button(f"Apply to {year}", disabled=not n_changes,
+                         help="Nothing to change." if not n_changes else None):
+                _add_rows(STAFF, ch.new_staff)
+                _update_rows(STAFF, ch.staff_updates)
+                _add_rows(PLANS, ch.new_plans)
+                _update_rows(PLANS, ch.plan_updates)
+                _bump()
+                st.toast(f"{n_changes} change(s) ready — press Save to keep them.")
+                st.rerun()
+
+    vis = plans_df[(plans_df["Year"].astype(str).str.strip() == year) | (plans_df["Year"] == "")]
+    vis = vis[vis["Staff"].isin(in_view) | (vis["Staff"] == "")].sort_values("Staff")
+    edit_table(
+        PLANS, vis,
+        column_config={
+            "Staff": st.column_config.SelectboxColumn("✏️ Staff", options=staff_names, required=True),
+            "Target (h)": st.column_config.NumberColumn(
+                "✏️ Target (h)", min_value=0, step=1,
+                help=f"Blank = role × FTE × {cfg.ANNUAL_WEEKS:g} weeks. 0 = no load this year (e.g. on leave).",
+            ),
+            "Other allocated (h)": st.column_config.NumberColumn(
+                "✏️ Other allocated (h)", min_value=0, step=1,
+                help="Hours allocated that aren't 📚 Teaching lines (e.g. from the spreadsheet).",
+            ),
+            "Plan": st.column_config.SelectboxColumn("✏️ Plan?", options=cfg.PLAN_OPTIONS, width="small",
+                                                     help="Articulated plan if underloaded."),
+            "Summer hrs needed": st.column_config.NumberColumn("✏️ Summer hrs needed", min_value=0, step=1),
+            "Likelihood": st.column_config.SelectboxColumn("✏️ Likelihood", options=cfg.LIKELIHOOD_OPTIONS),
+            "Subject": st.column_config.TextColumn("✏️ Subject", help="e.g. EDUC1010"),
+            "Notes": st.column_config.TextColumn("✏️ Notes / details", width="large"),
+        },
+        order=["Staff", "Target (h)", "Other allocated (h)", "Plan", "Summer hrs needed", "Likelihood",
+               "Subject", "Notes"],
+        defaults={"Year": year},
+        key="ed_plan",
+    )
+
+
 # ---------------------------------------------------------------- calendar
 with tab_cal:
     st.caption(
@@ -599,7 +706,8 @@ with tab_staff:
     st.caption(
         "Everyone whose workload is managed here — one row per person, even if they teach "
         "in several disciplines. Role sets the annual target (DI hrs/wk × "
-        f"{cfg.ANNUAL_WEEKS:g} weeks); FTE scales it. Untick Active for someone who's left — "
+        f"{cfg.ANNUAL_WEEKS:g} weeks); FTE scales it; a 🎯 Year plan target overrides it for that "
+        "year. Untick Active for someone who's left — "
         "their history stays."
     )
     vis = staff_df
@@ -609,6 +717,8 @@ with tab_staff:
         STAFF, vis.sort_values("Staff"),
         column_config={
             "Staff": st.column_config.TextColumn("✏️ Name", required=True),
+            "Employee No": st.column_config.TextColumn("✏️ Employee No", width="small",
+                                                       help="Used to match people on import."),
             "Role": st.column_config.SelectboxColumn(
                 "✏️ Role", options=cfg.STAFF_ROLES, required=True,
                 help="Sets the DI hrs/wk behind the annual target — " + _limits + " full-time. "
@@ -620,7 +730,7 @@ with tab_staff:
             "Active": st.column_config.CheckboxColumn("✏️ Active", width="small"),
             "Notes": st.column_config.TextColumn("✏️ Notes", width="medium"),
         },
-        order=["Staff", "Role", "FTE", "Supervisor", "Home discipline", "Active", "Notes"],
+        order=["Staff", "Employee No", "Role", "FTE", "Supervisor", "Home discipline", "Active", "Notes"],
         defaults={"Role": cfg.DEFAULT_ROLE, "FTE": "1", "Active": "TRUE",
                   "Supervisor": sup_filter[0] if len(sup_filter) == 1 else ""},
         key="ed_staff",

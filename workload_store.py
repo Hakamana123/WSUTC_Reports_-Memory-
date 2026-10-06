@@ -1,12 +1,14 @@
-"""Workload Management's memory: five tabs in its own Google Sheet.
+"""Workload Management's memory: six tabs in its own Google Sheet.
 
-  * `wl_staff`        — who's on the team: role, FTE, supervisor.
+  * `wl_staff`        — who's on the team: employee no, role, FTE, supervisor.
   * `wl_allocations`  — teaching: one line per class/subject a person teaches in
                         a session (and block), with its discipline and DI hours.
   * `wl_adjustments`  — higher duties and other duties that take hours out of
                         a person's teaching for a session/block (or part of one).
   * `wl_calendar`     — each block's start date and number of teaching weeks.
-  * `wl_log`          — append-only history across all three: who changed
+  * `wl_year_plans`   — per person per year: target override, hours allocated
+                        outside the teaching lines, and the underload plan.
+  * `wl_log`          — append-only history across all of them: who changed
                         which field, from what, to what, when — and the full
                         contents of anything removed. Never edited.
 
@@ -41,7 +43,7 @@ AUDIT_COLUMNS = ["last_saved_by", "last_saved_at"]
 
 STAFF = Table(
     "wl_staff",
-    ["Staff", "Role", "FTE", "Supervisor", "Home discipline", "Active", "Notes"],
+    ["Staff", "Employee No", "Role", "FTE", "Supervisor", "Home discipline", "Active", "Notes"],
     ("Staff",),
 )
 ALLOCATIONS = Table(
@@ -59,7 +61,13 @@ CALENDAR = Table(
     ["Session", "Block", "Start date", "Teaching weeks", "Notes"],
     ("Session", "Block"),
 )
-TABLES = {t.name: t for t in (STAFF, ALLOCATIONS, ADJUSTMENTS, CALENDAR)}
+PLANS = Table(
+    "wl_year_plans",
+    ["Staff", "Year", "Target (h)", "Other allocated (h)", "Plan", "Summer hrs needed", "Likelihood",
+     "Subject", "Notes"],
+    ("Staff", "Year"),
+)
+TABLES = {t.name: t for t in (STAFF, ALLOCATIONS, ADJUSTMENTS, CALENDAR, PLANS)}
 
 LOG_NAME = "wl_log"
 LOG_COLUMNS = ["At", "By", "Table", "ID", "Row", "Change", "Field", "From", "To"]

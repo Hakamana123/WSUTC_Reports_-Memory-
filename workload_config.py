@@ -97,17 +97,29 @@ BLOCK_DATES: dict[tuple[str, str], tuple[str, int]] = {
 }
 
 # --- Disciplines -------------------------------------------------------------
-# Starting list only — anything already in the Sheet is offered as well.
+# The College's organisation units, as in the L&T load tracking spreadsheet.
+# Anything already in the Sheet is offered as well.
 DISCIPLINES: list[str] = [
-    "Academic Literacies",
     "Arts",
+    "Associate Degree in Engineering",
+    "Building Design and Construction",
     "Business",
-    "Computing & IT",
-    "Engineering",
+    "Creative Industries and Communications",
+    "Education Studies",
+    "Enabling Programs",
+    "Engineering Studies",
     "Health Science",
-    "Mathematics",
+    "Information and Communication Technology",
     "Science",
+    "Social Sciences",
 ]
+
+# --- Year plan ---------------------------------------------------------------
+# One row per person per year: a target that overrides role × FTE × 36 (part-
+# year contracts, leave), hours allocated outside the Teaching lines (e.g. the
+# load tracking spreadsheet's total), and how any underload will be made up.
+PLAN_OPTIONS: list[str] = ["Yes", "No", "N/A"]
+LIKELIHOOD_OPTIONS: list[str] = ["Met before summer", "Confirmed", "Possible", "Not likely"]
 
 # --- Load adjustments --------------------------------------------------------
 HIGHER_DUTIES = "Higher duties (acting)"
