@@ -22,7 +22,7 @@ Axes* (Koh & Roffey, Sept 2026).
 | `workload_export.py` — the year grid as an Excel workbook | done |
 | `pages/2_Workload_Management.py` — supervisor dashboard and editors | live |
 
-142 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
+145 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
 `python scripts/smoke_test_sheet.py`.
 
 This is a **multipage app** (Streamlit's native `pages/` convention, same as
@@ -93,11 +93,12 @@ The sidebar picks the year and an "as at" date.
   sheet, headers found by name; people matched by Employee No then name;
   new people added as Teacher (Ongoing); a newer version refreshes the
   plan fields. Warns about look-alike names and people on only one sheet.
-- **Dashboard** — the year grid first: one row per person, and per block in
-  calendar order (SU2, AB1–4, SB1–4, SU1) their subjects (tagged with the
-  program when it isn't their home one) and duties (*Acting SC*), then hrs/wk.
-  Hours above the role's weekly limit × FTE are orange (casuals have no
-  limit); the block the As at date falls in is green; target, total, ± and
+- **Dashboard** — the year grid first: one row per person, one column per
+  block in calendar order (SU2, AB1–4, SB1–4, SU1) showing the block's total
+  hours, then their subjects (tagged with the program when it isn't their
+  home one) and duties (*Acting SC 24h*). Cells are tinted blue by how full
+  the block is against the role's limit × FTE × its weeks, orange when over,
+  grey for casuals (no limit); ▶ marks the current block; target, total, ± and
   status on the right. Click a block to edit that person's teaching and duties
   for it (or their name for the whole year) in the same editors as the tabs;
   **Export the grid** downloads it as Excel with the same colours. The UI says

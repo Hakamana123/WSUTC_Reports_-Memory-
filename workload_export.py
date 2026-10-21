@@ -1,8 +1,9 @@
-"""The dashboard's year grid as an Excel workbook, laid out as on screen:
-Name / Role / Program, then a subject column and an h/wk column per block in
-calendar order, then target, total, ± and status. Orange = a block above the
-role's weekly limit; green = the current block. Names and the header row are
-frozen. Pure: a DataFrame in, bytes out.
+"""The dashboard's year grid as an Excel workbook: Name / Role / Program, then
+a subjects column and an hours column (the block's total) per block in
+calendar order, then target, total, ± and status. Hours are tinted as on
+screen — blue by how full the block is, orange over the limit, grey for
+casuals — and the current block's header is green. Names and the header row
+are frozen. Pure: a DataFrame in, bytes out.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 ORANGE = PatternFill("solid", fgColor="F8C9A0")
+GREY = PatternFill("solid", fgColor="EBEBEB")
 GREEN = PatternFill("solid", fgColor="D5EFD9")
 HEADER = PatternFill("solid", fgColor="EDEDED")
 
@@ -33,10 +35,23 @@ def _value(v):
     return v
 
 
-def grid_xlsx(grid: pd.DataFrame, labels: list[str], over: set[tuple[str, str]], now: str | None,
-              sheet: str = "Workload") -> bytes:
-    """`grid` as the dashboard shows it (columns Staff, Role, Program, then
-    "<label>" / "<label> h" per block, then Target, Total, Variance, Status)."""
+def _blue(load: float) -> PatternFill:
+    """White → the dashboard's blue (76, 120, 168) as the block fills up."""
+    a = 0.06 + 0.34 * min(max(load, 0.0), 1.0)
+    rgb = "".join(f"{round(255 - (255 - c) * a):02X}" for c in (76, 120, 168))
+    return PatternFill("solid", fgColor=rgb)
+
+
+def _fill(load: float | None) -> PatternFill:
+    if load is None:
+        return GREY
+    return ORANGE if load > 1 + 1e-9 else _blue(load)
+
+
+def grid_xlsx(grid: pd.DataFrame, labels: list[str], load: dict[tuple[str, str], float | None],
+              now: str | None, sheet: str = "Workload") -> bytes:
+    """`grid` from workload_rules.year_grid joined with Target, Total,
+    Variance and Status; `load` as year_grid returns it."""
     wb = Workbook()
     ws = wb.active
     ws.title = sheet[:31]
@@ -44,22 +59,23 @@ def grid_xlsx(grid: pd.DataFrame, labels: list[str], over: set[tuple[str, str]],
     hours = {f"{lb} h": lb for lb in labels}
 
     for j, c in enumerate(cols, 1):
-        title = "h/wk" if c in hours else TITLES.get(c, c)
+        title = "Hours" if c in hours else TITLES.get(c, c)
         if c == now:
             title += " (now)"
         cell = ws.cell(row=1, column=j, value=title)
-        cell.font, cell.fill = Font(bold=True), HEADER
+        current = c == now or hours.get(c) == now
+        cell.font, cell.fill = Font(bold=True), GREEN if now and current else HEADER
         cell.alignment = Alignment(horizontal="center")
 
     for i, row in enumerate(grid.itertuples(index=False), 2):
         name = row[0]
         for j, (c, v) in enumerate(zip(cols, row), 1):
             cell = ws.cell(row=i, column=j, value=_value(v))
-            block = hours.get(c, c if c in labels else None)
-            if block and block == now:
-                cell.fill = GREEN
-            if c in hours and (name, hours[c]) in over:
-                cell.fill, cell.font = ORANGE, Font(bold=True)
+            if c in hours and (name, hours[c]) in load:
+                cell.fill = _fill(load[(name, hours[c])])
+                cell.number_format = "#,##0"
+                if cell.fill is ORANGE:
+                    cell.font = Font(bold=True)
 
     for j, c in enumerate(cols, 1):
         width = 7 if c in hours else 28 if c in labels or c in ("Staff", "Program") else 14

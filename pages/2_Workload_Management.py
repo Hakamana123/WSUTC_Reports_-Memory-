@@ -369,8 +369,9 @@ with tab_dash:
             st.warning(f"No blocks in the 📅 Calendar for 20{yy} yet — every hour counts as zero "
                        "until the blocks and their teaching weeks are entered.")
 
-        grid, over = rules.year_grid(staff_df, alloc_df, adj_df, yy)
-        over = {(n_, lb) for n_, lb in over if n_ in set(summary["Staff"])}
+        grid, load = rules.year_grid(staff_df, alloc_df, adj_df, cal_df, yy)
+        load = {k: v for k, v in load.items() if k[0] in set(summary["Staff"])}
+        over = rules.over_limit(load)
 
         n = summary["Status"].value_counts()
         m = st.columns(7)
@@ -387,8 +388,8 @@ with tab_dash:
                     delta=f"{confirmed:,.0f} confirmed" if summer.sum() else None, delta_color="off",
                     help="From the 🎯 Year plan: summer teaching hours needed to make up underloads.")
         m[6].metric("Blocks over limit", len(over),
-                    help="Blocks where someone's hrs/wk (teaching + duties) is above their role's "
-                    "weekly limit × FTE — even if their year is on track. Casuals have no limit.")
+                    help="Blocks where someone's hours (teaching + duties) are above their role's "
+                    "limit × FTE × the block's weeks — even if their year is on track. Casuals have no limit.")
 
         status_filter = st.multiselect(
             "Show", rules.STATUSES, placeholder="Everyone — or pick a status",
@@ -396,40 +397,49 @@ with tab_dash:
         )
         shown = summary[summary["Status"].isin(status_filter)] if status_filter else summary
 
-        # the year grid: one row per person, what they do and hrs/wk in each
-        # block, in calendar order, then the year against the target
+        # the year grid: one row per person, one column per block in calendar
+        # order — the block's total hours, then what they do — tinted by how
+        # full the block is; then the year against the target
         labels = rules.grid_labels()
         now = rules.current_block(cal_df, yy, as_at)
         totals = shown.drop_duplicates("Staff").set_index("Staff")[["Target", "Total", "Variance", "Status"]]
         g = (grid[grid["Staff"].isin(shown["Staff"])].drop_duplicates("Staff").join(totals, on="Staff")
              .sort_values("Staff").reset_index(drop=True))
 
-        def _grid_css(df: pd.DataFrame) -> pd.DataFrame:
-            css = pd.DataFrame("", index=df.index, columns=df.columns)
-            if now:
-                css[[now, f"{now} h"]] = "background-color: rgba(46, 160, 67, 0.14)"
-            for i, name in df["Staff"].items():
-                for lb in labels:
-                    if (name, lb) in over:
-                        css.loc[i, f"{lb} h"] = "background-color: rgba(245, 133, 24, 0.45); font-weight: 600"
-            return css
-
-        # numbers as text, so empty blocks and casuals' target show blank rather than "None"
         def _txt(fmt: str):
+            # numbers as text, so blanks show blank rather than "None"
             return lambda v: "" if v is None or pd.isna(v) else format(v, fmt)
 
+        view = g[["Staff", "Role", "Program"]].copy()
         for lb in labels:
-            g[f"{lb} h"] = g[f"{lb} h"].map(_txt("g"))
-        g["Target"], g["Total"], g["Variance"] = (g["Target"].map(_txt(",.0f")), g["Total"].map(_txt(",.0f")),
-                                                 g["Variance"].map(_txt("+,.0f")))
-        styled = g.style.apply(_grid_css, axis=None)
+            view[lb] = [f"{h:,.0f}h · {w}" if h is not None and not pd.isna(h) else ""
+                        for h, w in zip(g[f"{lb} h"], g[lb])]
+        view["Target"], view["Total"], view["Variance"] = (
+            g["Target"].map(_txt(",.0f")), g["Total"].map(_txt(",.0f")), g["Variance"].map(_txt("+,.0f")))
+        view["Status"] = g["Status"]
+
+        def _tint(v: float | None) -> str:
+            if v is None:                                   # casual, or no weeks in the Calendar
+                return "background-color: rgba(158, 158, 158, 0.16)"
+            if v > 1 + 1e-9:
+                return "background-color: rgba(245, 133, 24, 0.5); font-weight: 600"
+            return f"background-color: rgba(76, 120, 168, {0.06 + 0.34 * v:.2f})"
+
+        def _grid_css(df: pd.DataFrame) -> pd.DataFrame:
+            css = pd.DataFrame("", index=df.index, columns=df.columns)
+            for i, name in df["Staff"].items():
+                for lb in labels:
+                    if (name, lb) in load:
+                        css.loc[i, lb] = _tint(load[(name, lb)])
+            return css
+
+        styled = view.style.apply(_grid_css, axis=None)
         starts = {(b["Session"], b["Block"]): b for b in blocks}
 
         def _block_help(session: str, block: str) -> str:
             b = starts.get((f"{yy} {session}", block))
-            when = f"starts {b['start']:%d/%m/%Y}, {b['weeks']:g} weeks" if b and b["start"] is not None \
-                else "no dates in the 📅 Calendar"
-            return f"{yy} {session} block {block}: {when}."
+            when = f"starts {b['start']:%d/%m/%Y}, {b['weeks']:g} weeks" if b and b["start"] is not None                 else "no dates in the 📅 Calendar"
+            return f"{yy} {session} block {block}: {when}. Total hours, then subjects and duties."
 
         grid_config = {
             "Staff": st.column_config.TextColumn("Name", pinned=True),
@@ -439,26 +449,25 @@ with tab_dash:
             "Total": st.column_config.TextColumn("Total (h)", help="Projected year, incl. other allocated hours."),
             "Variance": st.column_config.TextColumn("± Target (h)"),
         }
-        for s, b, lb in cfg.GRID_BLOCKS:
-            mark = " (now)" if lb == now else ""
-            grid_config[lb] = st.column_config.TextColumn(lb + mark, help=_block_help(s, b))
-            grid_config[f"{lb} h"] = st.column_config.Column(
-                "h/wk", width="small",
-                help=f"{lb}: DI hrs/wk taught + duty hrs/wk. Orange = above the role's limit × FTE.")
+        for s_, b_, lb in cfg.GRID_BLOCKS:
+            grid_config[lb] = st.column_config.TextColumn(f"▶ {lb} · now" if lb == now else lb,
+                                                          help=_block_help(s_, b_), width="medium")
         picked = st.dataframe(styled, hide_index=True, use_container_width=True, column_config=grid_config,
-                              height=min(38 + 35 * len(g), 640), on_select="rerun", selection_mode="single-cell",
+                              height=min(38 + 35 * len(view), 640), on_select="rerun", selection_mode="single-cell",
                               key=f"wl_grid_{st.session_state.get('wl_grid_k', 0)}")
         st.caption(
-            "Each block: subjects (tagged with the program when it isn't the person's own) and duties "
-            "such as *Acting SC*, then hours per week. 🟧 Orange hours = above the role's weekly limit × "
-            "FTE in that block, even if the year averages out. "
-            + (f"🟩 Green = the block the As at date falls in ({now}). " if now else "")
+            "Each block: its total hours (teaching + duties), then subjects — tagged with the program when "
+            "it isn't the person's own — and duties such as *Acting SC*. 🟦 The darker the blue, the closer "
+            "the block is to the role's limit × FTE × its weeks (a full-time Teacher's 4-week block: "
+            f"{cfg.ROLES[cfg.DEFAULT_ROLE] * 4:g} h). 🟧 Orange = over it, even if the year averages out. "
+            "⬜ Grey = casual (no limit). "
+            + (f"▶ marks the block the As at date falls in ({now}). " if now else "")
             + "Other allocated hours (🎯 Year plan) have no block, so they count only in Total. "
             "**Click a block to edit it; click a name to edit their whole year.**"
         )
         st.download_button(
             "⬇ Export the grid (Excel)",
-            data=wexport.grid_xlsx(g, labels, over, now, sheet=f"Workload 20{yy}"),
+            data=wexport.grid_xlsx(g, labels, load, now, sheet=f"Workload 20{yy}"),
             file_name=f"workload_grid_20{yy}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
@@ -470,7 +479,7 @@ with tab_dash:
         cells = picked.selection.cells if picked else []
         if cells:
             row, col = cells[0]
-            st.session_state["wl_cell"] = (g.iloc[row]["Staff"], col.removesuffix(" h"))
+            st.session_state["wl_cell"] = (view.iloc[row]["Staff"], col)
         cell = st.session_state.get("wl_cell")
         by_label = {lb: (s, b) for s, b, lb in cfg.GRID_BLOCKS}
         if cell and cell[0] in set(g["Staff"]) and (cell[1] in by_label or cell[1] == "Staff"):

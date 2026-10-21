@@ -359,28 +359,33 @@ def _duty_label(a, hours: float) -> str:
     return what + hrs + weeks
 
 
-def person_blocks(staff: dict, allocations: pd.DataFrame, adjustments: pd.DataFrame, yy: str) -> dict[str, dict]:
-    """{grid label: {"what", "hours", "over"}} for one person's blocks in year `yy`.
+def person_blocks(staff: dict, allocations: pd.DataFrame, adjustments: pd.DataFrame,
+                  calendar: pd.DataFrame, yy: str) -> dict[str, dict]:
+    """{grid label: {"what", "hours", "load"}} for one person's blocks in year `yy`.
 
     what  = subject codes (tagged with the program when it isn't their home
-            discipline), then duties ("Acting SC");
-    hours = DI hrs/wk taught + duty hrs/wk in that block — a part-block duty
-            counts in full, as its weeks overlap the teaching from the start;
-    over  = hours above the role's limit × FTE. Casuals have no limit, so are
-            never over. Blocks with nothing in them are left out."""
+            discipline), then duties with their hours ("Acting SC 24h");
+    hours = the block's total: DI hrs/wk × the block's teaching weeks, plus
+            each duty's hrs/wk × the weeks it covers (as in person_year);
+    load  = hours ÷ the role's allowance for the block (limit × FTE × its
+            weeks): 1 = exactly at the limit, above 1 = over. None for
+            casuals (no limit) or a block with no weeks in the Calendar.
+    Blocks with nothing in them are left out."""
     name, role, home = staff["Staff"], staff.get("Role", ""), str(staff.get("Home discipline", "")).strip()
     f = fte(staff.get("FTE"))
     limit = role_limit(role, f)
+    weeks = {(c["Session"], c["Block"]): c["weeks"] for c in calendar_blocks(calendar, yy)}
     alloc = allocations[allocations["Staff"] == name]
     adj = adjustments[adjustments["Staff"] == name]
     out = {}
     for s, b, label in cfg.GRID_BLOCKS:
         session = f"{yy} {s}"
+        w = weeks.get((session, b), 0.0)
         subjects, duties, hours = [], [], 0.0
         for _, r in alloc[alloc["Session"] == session].iterrows():
             if not in_block(r["Block"], b):
                 continue
-            hours += num(r["DI hrs/wk"])
+            hours += num(r["DI hrs/wk"]) * w
             disc = str(r["Discipline"]).strip()
             subj = str(r["Subject"]).strip() or disc or "(no subject)"
             if disc and home and disc != home and subj != disc:
@@ -390,36 +395,45 @@ def person_blocks(staff: dict, allocations: pd.DataFrame, adjustments: pd.DataFr
         for _, a in adj[adj["Session"] == session].iterrows():
             if not in_block(a["Block"], b):
                 continue
-            h = duty_hours_per_week(a, role, f)
+            aw = min(num(a["Weeks"]), w) if num(a["Weeks"]) > 0 else w
+            h = duty_hours_per_week(a, role, f) * aw
             hours += h
             duties.append(_duty_label(a, h))
         if subjects or duties:
-            out[label] = {"what": " · ".join([", ".join(subjects)] * bool(subjects) + duties),
-                          "hours": hours, "over": limit is not None and hours > limit + 1e-9}
+            allowance = None if limit is None else limit * w
+            out[label] = {"what": " · ".join([", ".join(subjects)] * bool(subjects) + duties), "hours": hours,
+                          "load": hours / allowance if allowance else None}
     return out
 
 
+def over_limit(load: dict[tuple[str, str], float | None]) -> set[tuple[str, str]]:
+    """The (name, label) blocks whose load is above the role's allowance."""
+    return {k for k, v in load.items() if v is not None and v > 1 + 1e-9}
+
+
 def year_grid(staff: pd.DataFrame, allocations: pd.DataFrame, adjustments: pd.DataFrame,
-              yy: str) -> tuple[pd.DataFrame, set[tuple[str, str]]]:
-    """(grid, over) for every active staff member in year `yy`.
+              calendar: pd.DataFrame, yy: str) -> tuple[pd.DataFrame, dict[tuple[str, str], float | None]]:
+    """(grid, load) for every active staff member in year `yy`.
 
     grid: Staff, Role, Program (home discipline), then per block in calendar
-    order "<label>" (what they do) and "<label> h" (hrs/wk; blank if nothing).
-    over: {(name, label)} for blocks above the role's weekly limit."""
+    order "<label>" (what they do) and "<label> h" (the block's total hours;
+    blank if nothing).
+    load: {(name, label): hours ÷ allowance, or None} for every block with
+    something in it — see person_blocks."""
     active = staff[staff["Active"].str.upper() != "FALSE"]
-    rows, over = [], set()
+    rows, load = [], {}
     for s in active.to_dict("records"):
-        blocks = person_blocks(s, allocations, adjustments, yy)
+        blocks = person_blocks(s, allocations, adjustments, calendar, yy)
         row = {"Staff": s["Staff"], "Role": s.get("Role", ""), "Program": s.get("Home discipline", "")}
         for label in grid_labels():
             cell = blocks.get(label)
             row[label] = cell["what"] if cell else ""
             row[f"{label} h"] = cell["hours"] if cell else None
-            if cell and cell["over"]:
-                over.add((s["Staff"], label))
+            if cell:
+                load[(s["Staff"], label)] = cell["load"]
         rows.append(row)
     cols = ["Staff", "Role", "Program"] + [c for label in grid_labels() for c in (label, f"{label} h")]
-    return pd.DataFrame(rows, columns=cols), over
+    return pd.DataFrame(rows, columns=cols), load
 
 
 def orphans(staff: pd.DataFrame, table: pd.DataFrame) -> list[str]:

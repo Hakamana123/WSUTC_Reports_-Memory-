@@ -235,8 +235,12 @@ def test_part_block_duties_to_date_count_from_the_block_start():
 # --------------------------------------------------------------------------
 
 
-def grid(st_, al, ad=None):
-    return rules.year_grid(st_, al, adj().iloc[0:0] if ad is None else ad, "26")
+def grid(st_, al, ad=None, calendar=None):
+    """(grid, over) on the default calendar: 3-week blocks, so a full-time
+    Teacher's allowance is 48 h a block."""
+    g, load = rules.year_grid(st_, al, adj().iloc[0:0] if ad is None else ad,
+                              cal() if calendar is None else calendar, "26")
+    return g, rules.over_limit(load)
 
 
 def test_grid_columns_run_in_calendar_order():
@@ -245,17 +249,24 @@ def test_grid_columns_run_in_calendar_order():
     assert list(g.columns[:5]) == ["Staff", "Role", "Program", "SU2", "SU2 h"]
 
 
-def test_grid_cell_lists_subjects_and_adds_their_hours():
+def test_grid_cell_lists_subjects_and_totals_the_block():
     st_ = staff({"Staff": "Ana"})
     al = alloc({"Staff": "Ana", "Subject": "MATH1001", "DI hrs/wk": "10"},          # every AUT block
                {"Staff": "Ana", "Subject": "MATH1002", "DI hrs/wk": "6", "Block": "2"},
                {"Staff": "Ana", "Subject": "MATH1001", "DI hrs/wk": "2", "Block": "2"})
     g, over = grid(st_, al)
     r = g.iloc[0]
-    assert r["AB1"] == "MATH1001" and r["AB1 h"] == 10
-    assert r["AB2"] == "MATH1001, MATH1002" and r["AB2 h"] == 18
+    assert r["AB1"] == "MATH1001" and r["AB1 h"] == 30                     # 10 × 3 weeks
+    assert r["AB2"] == "MATH1001, MATH1002" and r["AB2 h"] == 54
     assert r["SB1"] == "" and pd.isna(r["SB1 h"])
-    assert over == {("Ana", "AB2")}                                         # 18 > 16
+    assert over == {("Ana", "AB2")}                                         # 54 > 48
+
+
+def test_grid_load_is_hours_over_the_blocks_allowance():
+    st_ = staff({"Staff": "Ana"})
+    _, load = rules.year_grid(st_, alloc({"Staff": "Ana", "DI hrs/wk": "8", "Block": "1"}), adj().iloc[0:0],
+                              cal(), "26")
+    assert load == {("Ana", "AB1"): 0.5}
 
 
 def test_grid_tags_teaching_outside_the_home_program():
@@ -264,7 +275,7 @@ def test_grid_tags_teaching_outside_the_home_program():
                {"Staff": "Ana", "Subject": "BUS1001", "Discipline": "Business", "DI hrs/wk": "8", "Block": "1"})
     g, over = grid(st_, al)
     assert g.iloc[0]["AB1"] == "SCI1001, BUS1001 (Business)"
-    assert g.iloc[0]["AB1 h"] == 16 and not over                            # 16 across programs = at limit
+    assert g.iloc[0]["AB1 h"] == 48 and not over                            # 16/wk across programs = at limit
 
 
 def test_grid_acting_cover_shows_in_the_cell_and_counts_its_hours():
@@ -276,18 +287,27 @@ def test_grid_acting_cover_shows_in_the_cell_and_counts_its_hours():
               "Weeks": "2"})
     g, over = grid(st_, al, ad)
     r = g.iloc[0]
-    assert r["AB1"] == "MATH1001 · Acting SC 6h" and r["AB1 h"] == 16
-    assert r["AB2"] == "MATH1001 · Acting SC 6h (2 wk)" and r["AB2 h"] == 22
+    assert r["AB1"] == "MATH1001 · Acting SC 18h" and r["AB1 h"] == 48     # 30 + 6 × 3
+    assert r["AB2"] == "MATH1001 · Acting SC 12h (2 wk)" and r["AB2 h"] == 60
     assert over == {("Ana", "AB2")}                                         # kept all teaching while acting
 
 
-def test_grid_limit_scales_by_fte_and_casuals_are_never_over():
+def test_grid_limit_scales_by_fte_and_casuals_have_no_load():
     st_ = staff({"Staff": "Half", "FTE": "0.5"}, {"Staff": "Cas", "Role": "Teacher (Casual)"})
     al = alloc({"Staff": "Half", "DI hrs/wk": "10", "Block": "1"},
                {"Staff": "Cas", "DI hrs/wk": "40", "Block": "1"})
-    g, over = grid(st_, al)
-    assert over == {("Half", "AB1")}
-    assert g.set_index("Staff").loc["Cas", "AB1 h"] == 40
+    g, load = rules.year_grid(st_, al, adj().iloc[0:0], cal(), "26")
+    assert rules.over_limit(load) == {("Half", "AB1")}                      # 30 > 8 × 3
+    assert load[("Cas", "AB1")] is None
+    assert g.set_index("Staff").loc["Cas", "AB1 h"] == 120
+
+
+def test_grid_block_missing_from_the_calendar_counts_zero():
+    st_ = staff({"Staff": "Ana"})
+    c = cal({"Session": "26 AUT", "Block": "1"})
+    g, load = rules.year_grid(st_, alloc({"Staff": "Ana", "Subject": "X", "DI hrs/wk": "4", "Block": "2"}),
+                              adj().iloc[0:0], c, "26")
+    assert g.iloc[0]["AB2"] == "X" and g.iloc[0]["AB2 h"] == 0 and load[("Ana", "AB2")] is None
 
 
 def test_grid_summer_blocks_and_inactive_staff():
