@@ -22,7 +22,7 @@ Axes* (Koh & Roffey, Sept 2026).
 | `workload_export.py` — the year grid as an Excel workbook | done |
 | `pages/2_Workload_Management.py` — supervisor dashboard and editors | live |
 
-151 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
+152 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
 `python scripts/smoke_test_sheet.py`.
 
 This is a **multipage app** (Streamlit's native `pages/` convention, same as
@@ -68,7 +68,10 @@ Everything contestable is in `config.py`.
 For supervisors. Each person's **year in hours** against an annual target:
 their role's Direct Instruction (DI) hrs/wk × FTE × 36 teaching weeks — 576 h
 for a full-time Teacher (The College Enterprise Agreement 2022, Sch B 2.7).
-The sidebar picks the year and an "as at" date.
+The sidebar picks the year and an "as at" date. **Year plan**, **Calendar**
+and **History** are setup tabs, hidden until *Show setup tabs* is switched on
+in the sidebar; their data counts either way, and a year with nothing in the
+Calendar uses the known block dates in `workload_config.BLOCK_DATES`.
 
 - **Staff** — name, role, FTE, supervisor, home discipline; one row per
   person. Role sets the DI hrs/wk: Teacher (Ongoing) 16, Subject Coordinator

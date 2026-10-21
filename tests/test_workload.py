@@ -359,6 +359,14 @@ def test_default_session(date, expected):
     assert rules.default_session(pd.Timestamp(date)) == expected
 
 
+def test_empty_calendar_year_uses_the_known_dates():
+    empty = cal().iloc[0:0]
+    blocks = rules.calendar_blocks(empty, "26")
+    assert len(blocks) == 10 and sum(b["weeks"] for b in blocks) == 40
+    assert rules.calendar_blocks(empty, "30") == []
+    assert len(rules.calendar_blocks(cal({"Session": "26 AUT", "Block": "1"}), "26")) == 1   # the Calendar wins
+
+
 def test_calendar_fill_adds_the_years_blocks_with_known_dates():
     new, fills = rules.calendar_fill(cal({"Session": "26 SPR", "Block": "1", "Teaching weeks": ""}), "26")
     got = {(r["Session"], r["Block"]): (r["Start date"], r["Teaching weeks"]) for r in new}

@@ -133,12 +133,16 @@ def session_sort_key(s: str) -> tuple[int, int]:
 
 
 def calendar_blocks(calendar: pd.DataFrame, yy: str) -> list[dict]:
-    """The year's blocks in order: {Session, Block, start (Timestamp | None), weeks}."""
+    """The year's blocks in order: {Session, Block, start (Timestamp | None), weeks}.
+    A year with nothing in the Calendar uses the known dates in cfg.BLOCK_DATES."""
     rows = []
     for _, r in calendar[calendar["Session"].map(lambda s: in_year(s, yy))].iterrows():
         start = pd.to_datetime(r["Start date"], errors="coerce")
         rows.append({"Session": r["Session"], "Block": str(r["Block"]).strip(),
                      "start": None if pd.isna(start) else start, "weeks": num(r["Teaching weeks"])})
+    if not rows:
+        rows = [{"Session": s, "Block": b, "start": pd.Timestamp(start), "weeks": float(weeks)}
+                for (s, b), (start, weeks) in cfg.BLOCK_DATES.items() if in_year(s, yy)]
     return sorted(rows, key=lambda r: (session_sort_key(r["Session"]), r["Block"]))
 
 

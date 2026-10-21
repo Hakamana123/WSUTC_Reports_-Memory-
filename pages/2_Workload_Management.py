@@ -49,13 +49,6 @@ _limits = " · ".join(
     f"{r} {v:g}"
     for r, v in cfg.ROLES.items() if v is not None
 )
-st.caption(
-    "Each person's year in hours — teaching plus higher duties and other duties — against "
-    f"an annual target of their role's Direct Instruction hrs/wk × {cfg.ANNUAL_WEEKS:g} weeks "
-    f"(The College Enterprise Agreement 2022): {_limits} hrs/wk, pro rata by FTE. "
-    f"A full-time Teacher's year is {cfg.ROLES[cfg.DEFAULT_ROLE] * cfg.ANNUAL_WEEKS:g} h. "
-    "Casual teachers have no target."
-)
 
 NUMERIC = {"FTE", "Classes", "DI hrs/wk", "DI relief hrs/wk", "Weeks", "Teaching weeks", "Target (h)",
            "Other allocated (h)", "Summer hrs needed"}
@@ -173,6 +166,11 @@ by = st.sidebar.text_input("Your name (required to save)")
 if st.sidebar.button("↻ Reload from Sheet"):
     _reload()
     st.rerun()
+show_setup = st.sidebar.toggle(
+    "Show setup tabs", key="wl_show_setup",
+    help="🎯 Year plan, 📅 Calendar and 🗂 History. Hidden doesn't switch them off: year plan targets "
+    "and hours still count, and a year with nothing in the Calendar uses the known block dates.",
+)
 
 # who's in view
 in_view = set(staff_df.loc[staff_df["Active"].str.upper() != "FALSE", "Staff"])
@@ -338,10 +336,10 @@ ADJ_ORDER = ["Staff", "Session", "Block", "Weeks", "Type", "Acting role", "DI re
 # --------------------------------------------------------------------------
 
 
-tab_dash, tab_teach, tab_adj, tab_plan, tab_cal, tab_staff, tab_hist = st.tabs(
-    ["📊 Dashboard", "📚 Teaching", "⬆ Higher duties & other duties", "🎯 Year plan", "📅 Calendar",
-     "👥 Staff", "🗂 History"]
-)
+_tabs = st.tabs(["📊 Dashboard", "📚 Teaching", "⬆ Higher duties & other duties", "👥 Staff"]
+                + (["🎯 Year plan", "📅 Calendar", "🗂 History"] if show_setup else []))
+tab_dash, tab_teach, tab_adj, tab_staff = _tabs[:4]
+tab_plan, tab_cal, tab_hist = _tabs[4:] if show_setup else (None, None, None)
 
 # discipline colours; HDA / other duties and other allocated hours always the same greys
 _PALETTE = ["#4c78a8", "#f58518", "#e45756", "#72b7b2", "#54a24b", "#eeca3b", "#b279a2",
@@ -360,14 +358,14 @@ with tab_dash:
     cal_weeks = sum(b["weeks"] for b in blocks)
 
     if staff_df.empty:
-        st.info("Start on the 👥 Staff tab — add the people you supervise, then the year's "
-                "blocks on 📅 Calendar, then their teaching on 📚 Teaching.")
+        st.info("Start on the 👥 Staff tab — add the people you supervise, then their teaching on "
+                "📚 Teaching.")
     elif summary.empty:
         st.info("Nobody matches the filters in the sidebar.")
     else:
         if not blocks:
-            st.warning(f"No blocks in the 📅 Calendar for 20{yy} yet — every hour counts as zero "
-                       "until the blocks and their teaching weeks are entered.")
+            st.warning(f"No blocks in the 📅 Calendar for 20{yy} and no known dates on file — every hour "
+                       "counts as zero until they're entered (sidebar: Show setup tabs).")
 
         grid, load = rules.year_grid(staff_df, alloc_df, adj_df, cal_df, yy)
         load = {k: v for k, v in load.items() if k[0] in set(summary["Staff"])}
@@ -767,120 +765,122 @@ def _update_rows(table, updates: dict[str, dict]) -> None:
     pending[table.name]["changed"] |= set(updates)
 
 
-with tab_plan:
-    year = rules.year_label(yy)
-    st.caption(
-        f"One row per person for {year}, all optional. **Target** replaces role × FTE × "
-        f"{cfg.ANNUAL_WEEKS:g} weeks (part-year contracts, leave — 0 counts). **Other allocated** "
-        "counts hours not entered as 📚 Teaching lines, e.g. the spreadsheet's allocated hours — "
-        "don't enter the same teaching both ways. The rest records how an underload will be made up."
-    )
-
-    with st.expander("⬆ Import the L&T load tracking spreadsheet"):
+if show_setup:
+    with tab_plan:
+        year = rules.year_label(yy)
         st.caption(
-            f"Reads the main sheet and the underload sheet into **{year}**: adds anyone not yet on "
-            "👥 Staff (matched by Employee No, then name — existing people keep their role, FTE and "
-            "supervisor), and sets each person's Year plan from it: target = required load, other "
-            "allocated = allocated hours, plus plan, summer hours, likelihood, subject and details. "
-            "Re-importing a newer version refreshes those fields. Nothing is saved until you press Save."
+            f"One row per person for {year}, all optional. **Target** replaces role × FTE × "
+            f"{cfg.ANNUAL_WEEKS:g} weeks (part-year contracts, leave — 0 counts). **Other allocated** "
+            "counts hours not entered as 📚 Teaching lines, e.g. the spreadsheet's allocated hours — "
+            "don't enter the same teaching both ways. The rest records how an underload will be made up."
         )
-        up = st.file_uploader("Load tracking spreadsheet (.xlsx)", type=["xlsx"], key="wl_import_file")
-        if up is not None:
-            parsed = wimport.parse_workbook(up)
-            ch = wimport.plan_changes(parsed, staff_df, plans_df, year)
-            for w in parsed.warnings:
-                st.warning(w)
-            i1, i2, i3, i4 = st.columns(4)
-            i1.metric("People in the file", len(parsed.people))
-            i2.metric("New staff", len(ch.new_staff))
-            i3.metric(f"New {year} plans", len(ch.new_plans))
-            i4.metric("Updates", len(ch.staff_updates) + len(ch.plan_updates))
-            st.dataframe(
-                pd.DataFrame([{
-                    "Name": p["name"], "Employee No": p["emp"], "Unit": p["unit"], "Required": p["required"],
-                    "Allocated": p["allocated"], "Plan": p["plan"], "Summer hrs": p["summer"],
-                    "Likelihood": p["likelihood"], "Subject": p["subject"], "Details": p["details"],
-                } for p in parsed.people]),
-                hide_index=True, use_container_width=True, height=250,
-            )
-            n_changes = (len(ch.new_staff) + len(ch.new_plans) + len(ch.staff_updates)
-                         + len(ch.plan_updates))
-            if st.button(f"Apply to {year}", disabled=not n_changes,
-                         help="Nothing to change." if not n_changes else None):
-                _add_rows(STAFF, ch.new_staff)
-                _update_rows(STAFF, ch.staff_updates)
-                _add_rows(PLANS, ch.new_plans)
-                _update_rows(PLANS, ch.plan_updates)
-                _bump()
-                st.toast(f"{n_changes} change(s) ready — press Save to keep them.")
-                st.rerun()
 
-    vis = plans_df[(plans_df["Year"].astype(str).str.strip() == year) | (plans_df["Year"] == "")]
-    vis = vis[vis["Staff"].isin(in_view) | (vis["Staff"] == "")].sort_values("Staff")
-    edit_table(
-        PLANS, vis,
-        column_config={
-            "Staff": st.column_config.SelectboxColumn("✏️ Staff", options=staff_names, required=True),
-            "Target (h)": st.column_config.NumberColumn(
-                "✏️ Target (h)", min_value=0, step=1,
-                help=f"Blank = role × FTE × {cfg.ANNUAL_WEEKS:g} weeks. 0 = no load this year (e.g. on leave).",
-            ),
-            "Other allocated (h)": st.column_config.NumberColumn(
-                "✏️ Other allocated (h)", min_value=0, step=1,
-                help="Hours allocated that aren't 📚 Teaching lines (e.g. from the spreadsheet).",
-            ),
-            "Plan": st.column_config.SelectboxColumn("✏️ Plan?", options=cfg.PLAN_OPTIONS, width="small",
-                                                     help="Articulated plan if underloaded."),
-            "Summer hrs needed": st.column_config.NumberColumn("✏️ Summer hrs needed", min_value=0, step=1),
-            "Likelihood": st.column_config.SelectboxColumn("✏️ Likelihood", options=cfg.LIKELIHOOD_OPTIONS),
-            "Subject": st.column_config.TextColumn("✏️ Subject", help="e.g. EDUC1010"),
-            "Notes": st.column_config.TextColumn("✏️ Notes / details", width="large"),
-        },
-        order=["Staff", "Target (h)", "Other allocated (h)", "Plan", "Summer hrs needed", "Likelihood",
-               "Subject", "Notes"],
-        defaults={"Year": year},
-        key="ed_plan",
-    )
+        with st.expander("⬆ Import the L&T load tracking spreadsheet"):
+            st.caption(
+                f"Reads the main sheet and the underload sheet into **{year}**: adds anyone not yet on "
+                "👥 Staff (matched by Employee No, then name — existing people keep their role, FTE and "
+                "supervisor), and sets each person's Year plan from it: target = required load, other "
+                "allocated = allocated hours, plus plan, summer hours, likelihood, subject and details. "
+                "Re-importing a newer version refreshes those fields. Nothing is saved until you press Save."
+            )
+            up = st.file_uploader("Load tracking spreadsheet (.xlsx)", type=["xlsx"], key="wl_import_file")
+            if up is not None:
+                parsed = wimport.parse_workbook(up)
+                ch = wimport.plan_changes(parsed, staff_df, plans_df, year)
+                for w in parsed.warnings:
+                    st.warning(w)
+                i1, i2, i3, i4 = st.columns(4)
+                i1.metric("People in the file", len(parsed.people))
+                i2.metric("New staff", len(ch.new_staff))
+                i3.metric(f"New {year} plans", len(ch.new_plans))
+                i4.metric("Updates", len(ch.staff_updates) + len(ch.plan_updates))
+                st.dataframe(
+                    pd.DataFrame([{
+                        "Name": p["name"], "Employee No": p["emp"], "Unit": p["unit"], "Required": p["required"],
+                        "Allocated": p["allocated"], "Plan": p["plan"], "Summer hrs": p["summer"],
+                        "Likelihood": p["likelihood"], "Subject": p["subject"], "Details": p["details"],
+                    } for p in parsed.people]),
+                    hide_index=True, use_container_width=True, height=250,
+                )
+                n_changes = (len(ch.new_staff) + len(ch.new_plans) + len(ch.staff_updates)
+                             + len(ch.plan_updates))
+                if st.button(f"Apply to {year}", disabled=not n_changes,
+                             help="Nothing to change." if not n_changes else None):
+                    _add_rows(STAFF, ch.new_staff)
+                    _update_rows(STAFF, ch.staff_updates)
+                    _add_rows(PLANS, ch.new_plans)
+                    _update_rows(PLANS, ch.plan_updates)
+                    _bump()
+                    st.toast(f"{n_changes} change(s) ready — press Save to keep them.")
+                    st.rerun()
+
+        vis = plans_df[(plans_df["Year"].astype(str).str.strip() == year) | (plans_df["Year"] == "")]
+        vis = vis[vis["Staff"].isin(in_view) | (vis["Staff"] == "")].sort_values("Staff")
+        edit_table(
+            PLANS, vis,
+            column_config={
+                "Staff": st.column_config.SelectboxColumn("✏️ Staff", options=staff_names, required=True),
+                "Target (h)": st.column_config.NumberColumn(
+                    "✏️ Target (h)", min_value=0, step=1,
+                    help=f"Blank = role × FTE × {cfg.ANNUAL_WEEKS:g} weeks. 0 = no load this year (e.g. on leave).",
+                ),
+                "Other allocated (h)": st.column_config.NumberColumn(
+                    "✏️ Other allocated (h)", min_value=0, step=1,
+                    help="Hours allocated that aren't 📚 Teaching lines (e.g. from the spreadsheet).",
+                ),
+                "Plan": st.column_config.SelectboxColumn("✏️ Plan?", options=cfg.PLAN_OPTIONS, width="small",
+                                                         help="Articulated plan if underloaded."),
+                "Summer hrs needed": st.column_config.NumberColumn("✏️ Summer hrs needed", min_value=0, step=1),
+                "Likelihood": st.column_config.SelectboxColumn("✏️ Likelihood", options=cfg.LIKELIHOOD_OPTIONS),
+                "Subject": st.column_config.TextColumn("✏️ Subject", help="e.g. EDUC1010"),
+                "Notes": st.column_config.TextColumn("✏️ Notes / details", width="large"),
+            },
+            order=["Staff", "Target (h)", "Other allocated (h)", "Plan", "Summer hrs needed", "Likelihood",
+                   "Subject", "Notes"],
+            defaults={"Year": year},
+            key="ed_plan",
+        )
 
 
 # ---------------------------------------------------------------- calendar
-with tab_cal:
-    st.caption(
-        f"Each block of 20{yy}: when it starts and how many teaching weeks it has. Hours are "
-        "DI hrs/wk × these weeks, and 'to date' counts the weeks up to the As at date. "
-        f"The target stays {cfg.ANNUAL_WEEKS:g} weeks' worth however many blocks the year has — "
-        "nobody teaches every block. Breaks between blocks simply aren't listed."
-    )
-    c1, c2 = st.columns([1, 3])
-    c1.metric("Teaching weeks", f"{cal_weeks:g}")
-    new_blocks, fills = rules.calendar_fill(cal_df, yy)
-    if (new_blocks or fills) and c2.button(
-        f"➕ Add the year's blocks, with the known dates ({len(new_blocks)} new, {len(fills)} to fill in)",
-        help="Adds any of the year's blocks not yet listed, and fills blank start dates / weeks "
-        "from the dates on file. Nothing is saved until you press Save.",
-    ):
-        for rid, vals in fills.items():
-            for c, v in vals.items():
-                cal_df.loc[cal_df["ID"] == rid, c] = v
-        pending[CALENDAR.name]["changed"] |= set(fills)
-        _add_rows(CALENDAR, [{"ID": wstore.new_id(), **r} for r in new_blocks])
-        _bump()
-        st.rerun()
-    vis = _year_rows(cal_df)
-    vis = vis.assign(_s=vis["Session"].map(rules.session_sort_key)).sort_values(["_s", "Block"]).drop(columns="_s")
-    edit_table(
-        CALENDAR, vis,
-        column_config={
-            "Session": st.column_config.SelectboxColumn("✏️ Session", options=year_sessions, required=True),
-            "Block": st.column_config.SelectboxColumn("✏️ Block", options=cfg.BLOCKS, required=True, width="small"),
-            "Start date": st.column_config.DateColumn("✏️ Start date", format="DD/MM/YYYY"),
-            "Teaching weeks": st.column_config.NumberColumn("✏️ Teaching weeks", min_value=0, step=1),
-            "Notes": st.column_config.TextColumn("✏️ Notes", width="medium"),
-        },
-        order=["Session", "Block", "Start date", "Teaching weeks", "Notes"],
-        defaults={"Session": new_row_session},
-        key="ed_cal",
-    )
+if show_setup:
+    with tab_cal:
+        st.caption(
+            f"Each block of 20{yy}: when it starts and how many teaching weeks it has. Hours are "
+            "DI hrs/wk × these weeks, and 'to date' counts the weeks up to the As at date. "
+            f"The target stays {cfg.ANNUAL_WEEKS:g} weeks' worth however many blocks the year has — "
+            "nobody teaches every block. Breaks between blocks simply aren't listed."
+        )
+        c1, c2 = st.columns([1, 3])
+        c1.metric("Teaching weeks", f"{cal_weeks:g}")
+        new_blocks, fills = rules.calendar_fill(cal_df, yy)
+        if (new_blocks or fills) and c2.button(
+            f"➕ Add the year's blocks, with the known dates ({len(new_blocks)} new, {len(fills)} to fill in)",
+            help="Adds any of the year's blocks not yet listed, and fills blank start dates / weeks "
+            "from the dates on file. Nothing is saved until you press Save.",
+        ):
+            for rid, vals in fills.items():
+                for c, v in vals.items():
+                    cal_df.loc[cal_df["ID"] == rid, c] = v
+            pending[CALENDAR.name]["changed"] |= set(fills)
+            _add_rows(CALENDAR, [{"ID": wstore.new_id(), **r} for r in new_blocks])
+            _bump()
+            st.rerun()
+        vis = _year_rows(cal_df)
+        vis = vis.assign(_s=vis["Session"].map(rules.session_sort_key)).sort_values(["_s", "Block"]).drop(columns="_s")
+        edit_table(
+            CALENDAR, vis,
+            column_config={
+                "Session": st.column_config.SelectboxColumn("✏️ Session", options=year_sessions, required=True),
+                "Block": st.column_config.SelectboxColumn("✏️ Block", options=cfg.BLOCKS, required=True, width="small"),
+                "Start date": st.column_config.DateColumn("✏️ Start date", format="DD/MM/YYYY"),
+                "Teaching weeks": st.column_config.NumberColumn("✏️ Teaching weeks", min_value=0, step=1),
+                "Notes": st.column_config.TextColumn("✏️ Notes", width="medium"),
+            },
+            order=["Session", "Block", "Start date", "Teaching weeks", "Notes"],
+            defaults={"Session": new_row_session},
+            key="ed_cal",
+        )
 
 
 # ---------------------------------------------------------------- staff
@@ -920,18 +920,20 @@ with tab_staff:
 
 
 # ---------------------------------------------------------------- history
-with tab_hist:
-    st.caption("Every saved change, newest first. Removed rows keep their last contents here.")
-    log = wstore.load_log(_backends()[wstore.LOG_NAME])
-    if log.empty:
-        st.caption("Nothing saved yet.")
-    else:
-        h1, h2 = st.columns(2)
-        who = h1.selectbox("Staff member", ["Everyone"] + staff_names, key="hist_who")
-        what = h2.multiselect("Table", list(wstore.TABLES), format_func=lambda t: t.removeprefix("wl_").title())
-        if who != "Everyone":
-            log = log[log["Row"].str.split(" · ").str[0] == who]
-        if what:
-            log = log[log["Table"].isin(what)]
-        log = log.assign(Table=log["Table"].str.removeprefix("wl_").str.title())
-        st.dataframe(log.drop(columns="ID"), hide_index=True, use_container_width=True)
+if show_setup:
+    with tab_hist:
+        st.caption("Every saved change, newest first. Removed rows keep their last contents here.")
+        log = wstore.load_log(_backends()[wstore.LOG_NAME])
+        if log.empty:
+            st.caption("Nothing saved yet.")
+        else:
+            h1, h2 = st.columns(2)
+            who = h1.selectbox("Staff member", ["Everyone"] + staff_names, key="hist_who")
+            what = h2.multiselect("Table", list(wstore.TABLES), format_func=lambda t: t.removeprefix("wl_").title())
+            if who != "Everyone":
+                log = log[log["Row"].str.split(" · ").str[0] == who]
+            if what:
+                log = log[log["Table"].isin(what)]
+            log = log.assign(Table=log["Table"].str.removeprefix("wl_").str.title())
+            st.dataframe(log.drop(columns="ID"), hide_index=True, use_container_width=True)
+
