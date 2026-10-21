@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import auth
 import store
 import workload_config as cfg
+import workload_export as wexport
 import workload_rules as rules
 import workload_import as wimport
 import workload_store as wstore
@@ -36,7 +37,7 @@ import workload_store as wstore
 # re-read from disk every run, but helper modules imported before the pull
 # (store.py, via IA Mapping) stay as the old code until the app is rebooted.
 # Reload them, in dependency order, so a push always takes effect here.
-for _m in (store, cfg, rules, wstore, wimport):
+for _m in (store, cfg, rules, wstore, wimport, wexport):
     importlib.reload(_m)
 
 from workload_store import ADJUSTMENTS, ALLOCATIONS, CALENDAR, PLANS, STAFF  # noqa: E402
@@ -162,9 +163,9 @@ sup_filter = st.sidebar.multiselect("Supervisor", supervisors, help="Show the st
 disciplines = sorted(set(cfg.DISCIPLINES) | {d for d in alloc_df["Discipline"] if d}
                      | {d for d in staff_df["Home discipline"] if d})
 disc_filter = st.sidebar.multiselect(
-    "Discipline", disciplines,
-    help="Show anyone teaching in these disciplines this year — with their "
-    "whole load, including hours in other disciplines.",
+    "Program", disciplines,
+    help="Show anyone teaching in these programs this year — with their "
+    "whole load, including hours in other programs.",
 )
 
 st.sidebar.divider()
@@ -289,6 +290,48 @@ def edit_table(table, visible: pd.DataFrame, column_config: dict, order: list[st
 
 staff_names = sorted(n for n in staff_df["Staff"] if n)
 
+# the Teaching and Duties editors' columns — also used by the grid's cell editor
+ALLOC_COLUMNS = {
+    "Staff": st.column_config.SelectboxColumn("✏️ Staff", options=staff_names, required=True),
+    "Session": st.column_config.SelectboxColumn("✏️ Session", options=year_sessions, required=True,
+                                                width="small"),
+    "Block": st.column_config.SelectboxColumn("✏️ Block", options=cfg.BLOCK_OPTIONS, required=True, width="small"),
+    "Discipline": st.column_config.SelectboxColumn("✏️ Program", options=disciplines),
+    "Subject": st.column_config.TextColumn("✏️ Subject / unit"),
+    "Classes": st.column_config.NumberColumn("✏️ Classes", min_value=0, step=1, width="small"),
+    "DI hrs/wk": st.column_config.NumberColumn(
+        "✏️ DI hrs/wk", min_value=0, step=0.5, required=True,
+        help="Direct Instruction hours per week for this line (face-to-face, online or hybrid).",
+    ),
+    "Notes": st.column_config.TextColumn("✏️ Notes", width="medium"),
+}
+ALLOC_ORDER = ["Staff", "Session", "Block", "Discipline", "Subject", "Classes", "DI hrs/wk", "Notes"]
+ADJ_COLUMNS = {
+    "Staff": st.column_config.SelectboxColumn("✏️ Staff", options=staff_names, required=True),
+    "Session": st.column_config.SelectboxColumn("✏️ Session", options=year_sessions, required=True,
+                                                width="small"),
+    "Block": st.column_config.SelectboxColumn("✏️ Block", options=cfg.BLOCK_OPTIONS, required=True, width="small"),
+    "Weeks": st.column_config.NumberColumn(
+        "✏️ Weeks", min_value=0, step=1, width="small",
+        help="Blank = the whole block. Otherwise how many weeks of the block it covers, "
+        "from the block's start.",
+    ),
+    "Type": st.column_config.SelectboxColumn("✏️ Type", options=cfg.ADJUSTMENT_TYPES, required=True),
+    "Acting role": st.column_config.SelectboxColumn(
+        "✏️ Acting role", options=cfg.ACTING_ROLES,
+        help="Higher duties: the role they're acting in — the DI hours it doesn't teach "
+        "become HDA hours. N/A for anything without an acting role; enter hours/week instead.",
+    ),
+    "DI relief hrs/wk": st.column_config.NumberColumn(
+        "✏️ Hours/wk", min_value=0, step=0.5,
+        help="Acting role N/A or anything other than higher duties: hours per week it takes "
+        "out of teaching.",
+    ),
+    "Notes": st.column_config.TextColumn("✏️ Notes", width="medium",
+                                         help="e.g. dates, approval reference."),
+}
+ADJ_ORDER = ["Staff", "Session", "Block", "Weeks", "Type", "Acting role", "DI relief hrs/wk", "Notes"]
+
 
 # --------------------------------------------------------------------------
 # tabs
@@ -391,7 +434,7 @@ with tab_dash:
         grid_config = {
             "Staff": st.column_config.TextColumn("Name", pinned=True),
             "Role": st.column_config.TextColumn("Role", pinned=True),
-            "Program": st.column_config.TextColumn("Program", pinned=True, help="Home discipline (👥 Staff)."),
+            "Program": st.column_config.TextColumn("Program", pinned=True, help="Home program (👥 Staff)."),
             "Target": st.column_config.TextColumn("Target (h)"),
             "Total": st.column_config.TextColumn("Total (h)", help="Projected year, incl. other allocated hours."),
             "Variance": st.column_config.TextColumn("± Target (h)"),
@@ -402,15 +445,69 @@ with tab_dash:
             grid_config[f"{lb} h"] = st.column_config.Column(
                 "h/wk", width="small",
                 help=f"{lb}: DI hrs/wk taught + duty hrs/wk. Orange = above the role's limit × FTE.")
-        st.dataframe(styled, hide_index=True, use_container_width=True, column_config=grid_config,
-                     height=min(38 + 35 * len(g), 640))
+        picked = st.dataframe(styled, hide_index=True, use_container_width=True, column_config=grid_config,
+                              height=min(38 + 35 * len(g), 640), on_select="rerun", selection_mode="single-cell",
+                              key=f"wl_grid_{st.session_state.get('wl_grid_k', 0)}")
         st.caption(
             "Each block: subjects (tagged with the program when it isn't the person's own) and duties "
             "such as *Acting SC*, then hours per week. 🟧 Orange hours = above the role's weekly limit × "
             "FTE in that block, even if the year averages out. "
             + (f"🟩 Green = the block the As at date falls in ({now}). " if now else "")
-            + "Other allocated hours (🎯 Year plan) have no block, so they count only in Total."
+            + "Other allocated hours (🎯 Year plan) have no block, so they count only in Total. "
+            "**Click a block to edit it; click a name to edit their whole year.**"
         )
+        st.download_button(
+            "⬇ Export the grid (Excel)",
+            data=wexport.grid_xlsx(g, labels, over, now, sheet=f"Workload 20{yy}"),
+            file_name=f"workload_grid_20{yy}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        # click-to-edit: a grid cell opens that person's lines for the block
+        # (or, for their name, the year) in the same editors as the tabs. The
+        # pick is kept in session state, as the grid's own selection is lost
+        # whenever an edit redraws it.
+        cells = picked.selection.cells if picked else []
+        if cells:
+            row, col = cells[0]
+            st.session_state["wl_cell"] = (g.iloc[row]["Staff"], col.removesuffix(" h"))
+        cell = st.session_state.get("wl_cell")
+        by_label = {lb: (s, b) for s, b, lb in cfg.GRID_BLOCKS}
+        if cell and cell[0] in set(g["Staff"]) and (cell[1] in by_label or cell[1] == "Staff"):
+            who, what = cell
+            home = staff_df.loc[staff_df["Staff"] == who, "Home discipline"].iloc[0]
+            with st.container(border=True):
+                t1, t2 = st.columns([5, 1])
+                if what == "Staff":
+                    sessions, blk = year_sessions, None
+                    t1.markdown(f"**✏️ {who} — 20{yy}**")
+                else:
+                    s, blk = by_label[what]
+                    sessions = [f"{yy} {s}"]
+                    t1.markdown(f"**✏️ {who} — {what}** ({yy} {s} block {blk})")
+                if t2.button("✕ Close", use_container_width=True):
+                    st.session_state.pop("wl_cell", None)
+                    st.session_state["wl_grid_k"] = st.session_state.get("wl_grid_k", 0) + 1
+                    st.rerun()
+
+                def _mine(df: pd.DataFrame) -> pd.DataFrame:
+                    hit = (df["Staff"] == who) & df["Session"].isin(sessions)
+                    if blk:
+                        hit &= df["Block"].map(lambda b: rules.in_block(b, blk))
+                    mine = df[hit]
+                    return mine.assign(_s=mine["Session"].map(rules.session_sort_key)).sort_values(
+                        ["_s", "Block"]).drop(columns="_s")
+
+                new_defaults = {"Staff": who, "Session": sessions[0] if blk else new_row_session,
+                                "Block": blk or cfg.ALL_BLOCKS}
+                st.caption("Teaching" + (" — lines for block *All* run every block of the session, so a "
+                                         "change there applies to all of them." if blk else ""))
+                edit_table(ALLOCATIONS, _mine(alloc_df), ALLOC_COLUMNS, ALLOC_ORDER,
+                           {**new_defaults, "Discipline": home}, key=f"ed_cell_alloc_{who}_{what}")
+                st.caption("Higher duties & other duties")
+                edit_table(ADJUSTMENTS, _mine(adj_df), ADJ_COLUMNS, ADJ_ORDER,
+                           {**new_defaults, "Acting role": cfg.NOT_ACTING}, key=f"ed_cell_adj_{who}_{what}")
+                st.caption("Changes show in the grid straight away; press 💾 Save changes at the top to keep them.")
 
         with st.expander("Chart and full table"):
             # the year per person: teaching by discipline, then HDA / other duties
@@ -437,7 +534,7 @@ with tab_dash:
                                                     range=colours + [_DUTIES_COLOUR, _OTHER_COLOUR]),
                                     legend=alt.Legend(orient="bottom")),
                     order=alt.Order("Part:N"),
-                    tooltip=["Staff", alt.Tooltip("Part:N", title="Discipline / duties"),
+                    tooltip=["Staff", alt.Tooltip("Part:N", title="Program / duties"),
                              alt.Tooltip("sum(Hours):Q", title="Hours", format=",.0f")],
                 )
                 targets = shown[shown["Target"].notna()][["Staff", "Target", "To date"]]
@@ -449,7 +546,7 @@ with tab_dash:
                 chart = alt.layer(bars, target_tick, done_tick).properties(height=alt.Step(30))
                 st.altair_chart(chart, use_container_width=True)
                 st.caption(
-                    "Bars: each person's projected year — teaching by discipline, then "
+                    "Bars: each person's projected year — teaching by program, then "
                     f"{rules.DUTIES} in grey and {_OTHER.lower()} hours (🎯 Year plan) in light grey. "
                     "Black tick: annual target. ▼: hours to date "
                     f"(as at {as_at:%d/%m/%Y})."
@@ -474,7 +571,7 @@ with tab_dash:
                                                         help="Articulated plan if underloaded (🎯 Year plan)."),
                     "Summer hrs needed": hours("Summer hrs needed", "From the 🎯 Year plan."),
                     "Teaching": hours("Teaching (h)", "DI hrs/wk × the teaching weeks of each block, every "
-                                      "discipline and session added up."),
+                                      "program and session added up."),
                     "Duties": hours(f"{rules.DUTIES} (h)", "Higher duties (the DI hours an acting role "
                                     "doesn't teach) plus other duties, for the weeks they cover."),
                     "Total": hours("Total (h)", "Projected year: teaching + HDA / other duties + other "
@@ -489,22 +586,22 @@ with tab_dash:
                         "DI hrs/wk (16 for a full-time Teacher).",
                     ),
                     **{s: hours(f"{s} (h)", f"Teaching + duties in {yy} {s}.") for s in cfg.SESSIONS},
-                    "Disciplines": st.column_config.TextColumn(width="medium"),
+                    "Disciplines": st.column_config.TextColumn("Programs", width="medium"),
                     "Adjustments": st.column_config.TextColumn("HDA / other duties", width="medium"),
                 },
             )
             st.caption(
                 f"{rules.STATUS_ON} — projected year within ±{cfg.ON_TRACK_TOLERANCE:.0%} of the target. "
                 f"{rules.STATUS_OVER} / {rules.STATUS_UNDER} — outside it. "
-                "One row per person, however many disciplines they teach in."
+                "One row per person, however many programs they teach in."
             )
 
         # discipline view
-        with st.expander("By discipline"):
+        with st.expander("By program"):
             rows = []
             y_alloc = alloc_df[alloc_df["Session"].isin(year_sessions) & alloc_df["Staff"].isin(shown["Staff"])]
             for d, g in y_alloc.groupby(y_alloc["Discipline"].replace("", "(none)")):
-                r = {"Discipline": d, "Staff": g["Staff"].nunique(),
+                r = {"Program": d, "Staff": g["Staff"].nunique(),
                      "Classes": sum(rules.num(c) for c in g["Classes"])}
                 for s in cfg.SESSIONS:
                     r[f"{s} (h)"] = sum(
@@ -516,7 +613,7 @@ with tab_dash:
                 rows.append(r)
             if rows:
                 st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
-                st.caption("Teaching hours in each discipline, by session.")
+                st.caption("Teaching hours in each program, by session.")
             else:
                 st.caption("No teaching this year.")
 
@@ -542,7 +639,7 @@ with tab_dash:
     dupes = staff_df["Staff"][staff_df["Staff"].duplicated() & (staff_df["Staff"] != "")]
     if not dupes.empty:
         st.warning("The same name is on the Staff list twice: " + ", ".join(sorted(set(dupes)))
-                   + " — keep one row per person; teaching in other disciplines goes on 📚 Teaching.")
+                   + " — keep one row per person; teaching in other programs goes on 📚 Teaching.")
 
 
 def _year_rows(df: pd.DataFrame) -> pd.DataFrame:
@@ -555,7 +652,7 @@ with tab_teach:
     st.caption(
         f"One line per class or subject someone teaches in 20{yy}. Pick the session and block "
         "on each line; block *All* = the same hours every block of that session. Someone "
-        "teaching in several disciplines just has several lines — the dashboard adds them up."
+        "teaching in several programs just has several lines — the dashboard adds them up."
     )
     vis = _year_rows(alloc_df)
     vis = vis[vis["Staff"].isin(in_view) | (vis["Staff"] == "")]
@@ -565,21 +662,8 @@ with tab_teach:
         ["Staff", "_s", "Block", "Subject"]).drop(columns="_s")
     edit_table(
         ALLOCATIONS, vis,
-        column_config={
-            "Staff": st.column_config.SelectboxColumn("✏️ Staff", options=staff_names, required=True),
-            "Session": st.column_config.SelectboxColumn("✏️ Session", options=year_sessions, required=True,
-                                                        width="small"),
-            "Block": st.column_config.SelectboxColumn("✏️ Block", options=cfg.BLOCK_OPTIONS, required=True, width="small"),
-            "Discipline": st.column_config.SelectboxColumn("✏️ Discipline", options=disciplines),
-            "Subject": st.column_config.TextColumn("✏️ Subject / unit"),
-            "Classes": st.column_config.NumberColumn("✏️ Classes", min_value=0, step=1, width="small"),
-            "DI hrs/wk": st.column_config.NumberColumn(
-                "✏️ DI hrs/wk", min_value=0, step=0.5, required=True,
-                help="Direct Instruction hours per week for this line (face-to-face, online or hybrid).",
-            ),
-            "Notes": st.column_config.TextColumn("✏️ Notes", width="medium"),
-        },
-        order=["Staff", "Session", "Block", "Discipline", "Subject", "Classes", "DI hrs/wk", "Notes"],
+        column_config=ALLOC_COLUMNS,
+        order=ALLOC_ORDER,
         defaults={"Session": new_row_session, "Block": cfg.ALL_BLOCKS,
                   "Discipline": disc_filter[0] if len(disc_filter) == 1 else ""},
         key="ed_alloc",
@@ -607,31 +691,8 @@ with tab_adj:
         ["Staff", "_s", "Block"]).drop(columns="_s")
     edit_table(
         ADJUSTMENTS, vis,
-        column_config={
-            "Staff": st.column_config.SelectboxColumn("✏️ Staff", options=staff_names, required=True),
-            "Session": st.column_config.SelectboxColumn("✏️ Session", options=year_sessions, required=True,
-                                                        width="small"),
-            "Block": st.column_config.SelectboxColumn("✏️ Block", options=cfg.BLOCK_OPTIONS, required=True, width="small"),
-            "Weeks": st.column_config.NumberColumn(
-                "✏️ Weeks", min_value=0, step=1, width="small",
-                help="Blank = the whole block. Otherwise how many weeks of the block it covers, "
-                "from the block's start.",
-            ),
-            "Type": st.column_config.SelectboxColumn("✏️ Type", options=cfg.ADJUSTMENT_TYPES, required=True),
-            "Acting role": st.column_config.SelectboxColumn(
-                "✏️ Acting role", options=cfg.ACTING_ROLES,
-                help="Higher duties: the role they're acting in — the DI hours it doesn't teach "
-                "become HDA hours. N/A for anything without an acting role; enter hours/week instead.",
-            ),
-            "DI relief hrs/wk": st.column_config.NumberColumn(
-                "✏️ Hours/wk", min_value=0, step=0.5,
-                help="Acting role N/A or anything other than higher duties: hours per week it takes "
-                "out of teaching.",
-            ),
-            "Notes": st.column_config.TextColumn("✏️ Notes", width="medium",
-                                                 help="e.g. dates, approval reference."),
-        },
-        order=["Staff", "Session", "Block", "Weeks", "Type", "Acting role", "DI relief hrs/wk", "Notes"],
+        column_config=ADJ_COLUMNS,
+        order=ADJ_ORDER,
         defaults={"Session": new_row_session, "Block": cfg.ALL_BLOCKS, "Acting role": cfg.NOT_ACTING},
         key="ed_adj",
     )
@@ -771,7 +832,7 @@ with tab_cal:
 with tab_staff:
     st.caption(
         "Everyone whose workload is managed here — one row per person, even if they teach "
-        "in several disciplines. Role sets the annual target (DI hrs/wk × "
+        "in several programs. Role sets the annual target (DI hrs/wk × "
         f"{cfg.ANNUAL_WEEKS:g} weeks); FTE scales it; a 🎯 Year plan target overrides it for that "
         "year. Untick Active for someone who's left — "
         "their history stays."
@@ -792,7 +853,7 @@ with tab_staff:
             ),
             "FTE": st.column_config.NumberColumn("✏️ FTE", min_value=0.1, max_value=1.0, step=0.1, width="small"),
             "Supervisor": st.column_config.TextColumn("✏️ Supervisor"),
-            "Home discipline": st.column_config.SelectboxColumn("✏️ Home discipline", options=disciplines),
+            "Home discipline": st.column_config.SelectboxColumn("✏️ Home program", options=disciplines),
             "Active": st.column_config.CheckboxColumn("✏️ Active", width="small"),
             "Notes": st.column_config.TextColumn("✏️ Notes", width="medium"),
         },

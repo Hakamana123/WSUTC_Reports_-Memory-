@@ -1,5 +1,6 @@
-streamlit>=1.45   # column pinning (year grid)
+streamlit>=1.66   # year grid: column pinning, cell selection
 pandas>=2.2
+openpyxl>=3.1      # reads the load tracking spreadsheet, writes the grid export
 gspread>=6.1
 google-auth>=2.30
 pytest>=8.0

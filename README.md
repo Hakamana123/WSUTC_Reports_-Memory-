@@ -19,9 +19,10 @@ Axes* (Koh & Roffey, Sept 2026).
 | `pages/1_IA_Mapping.py` — Streamlit review table | done, live-verified |
 | `workload_config.py` / `workload_rules.py` — roles, annual targets, year maths | done |
 | `workload_store.py` — staff / teaching / duties / calendar tabs + change log | done |
+| `workload_export.py` — the year grid as an Excel workbook | done |
 | `pages/2_Workload_Management.py` — supervisor dashboard and editors | live |
 
-141 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
+142 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
 `python scripts/smoke_test_sheet.py`.
 
 This is a **multipage app** (Streamlit's native `pages/` convention, same as
@@ -97,11 +98,14 @@ The sidebar picks the year and an "as at" date.
   program when it isn't their home one) and duties (*Acting SC*), then hrs/wk.
   Hours above the role's weekly limit × FTE are orange (casuals have no
   limit); the block the As at date falls in is green; target, total, ± and
-  status on the right. Under it, per person: target, teaching, HDA / other duties, other allocated, projected
+  status on the right. Click a block to edit that person's teaching and duties
+  for it (or their name for the whole year) in the same editors as the tabs;
+  **Export the grid** downloads it as Excel with the same colours. The UI says
+  *Program* for what the Sheet stores as *Discipline*. Under it, per person: target, teaching, HDA / other duties, other allocated, projected
   total, ± target, to date, left (target − to date), average hrs/wk, and
   hours per session. 🟢 on track (within ±5 %) · 🟠 off track — over ·
-  🟡 off track — under; filter by status, supervisor or discipline. The chart
-  stacks each person's teaching by discipline plus HDA / other duties.
+  🟡 off track — under; filter by status, supervisor or program. The chart
+  stacks each person's teaching by program plus HDA / other duties.
 
 **Memory.** Six tabs, created on first save: `wl_staff`, `wl_allocations`,
 `wl_adjustments`, `wl_calendar`, `wl_year_plans`, and `wl_log` (append-only: who changed which field, from
