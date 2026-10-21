@@ -231,6 +231,84 @@ def test_part_block_duties_to_date_count_from_the_block_start():
 
 
 # --------------------------------------------------------------------------
+# year grid
+# --------------------------------------------------------------------------
+
+
+def grid(st_, al, ad=None):
+    return rules.year_grid(st_, al, adj().iloc[0:0] if ad is None else ad, "26")
+
+
+def test_grid_columns_run_in_calendar_order():
+    assert rules.grid_labels() == ["SU2", "AB1", "AB2", "AB3", "AB4", "SB1", "SB2", "SB3", "SB4", "SU1"]
+    g, _ = grid(staff({"Staff": "Ana"}), alloc({"Staff": "Ana", "DI hrs/wk": "4"}))
+    assert list(g.columns[:5]) == ["Staff", "Role", "Program", "SU2", "SU2 h"]
+
+
+def test_grid_cell_lists_subjects_and_adds_their_hours():
+    st_ = staff({"Staff": "Ana"})
+    al = alloc({"Staff": "Ana", "Subject": "MATH1001", "DI hrs/wk": "10"},          # every AUT block
+               {"Staff": "Ana", "Subject": "MATH1002", "DI hrs/wk": "6", "Block": "2"},
+               {"Staff": "Ana", "Subject": "MATH1001", "DI hrs/wk": "2", "Block": "2"})
+    g, over = grid(st_, al)
+    r = g.iloc[0]
+    assert r["AB1"] == "MATH1001" and r["AB1 h"] == 10
+    assert r["AB2"] == "MATH1001, MATH1002" and r["AB2 h"] == 18
+    assert r["SB1"] == "" and pd.isna(r["SB1 h"])
+    assert over == {("Ana", "AB2")}                                         # 18 > 16
+
+
+def test_grid_tags_teaching_outside_the_home_program():
+    st_ = staff({"Staff": "Ana", "Home discipline": "Science"})
+    al = alloc({"Staff": "Ana", "Subject": "SCI1001", "Discipline": "Science", "DI hrs/wk": "8", "Block": "1"},
+               {"Staff": "Ana", "Subject": "BUS1001", "Discipline": "Business", "DI hrs/wk": "8", "Block": "1"})
+    g, over = grid(st_, al)
+    assert g.iloc[0]["AB1"] == "SCI1001, BUS1001 (Business)"
+    assert g.iloc[0]["AB1 h"] == 16 and not over                            # 16 across programs = at limit
+
+
+def test_grid_acting_cover_shows_in_the_cell_and_counts_its_hours():
+    st_ = staff({"Staff": "Ana"})
+    al = alloc({"Staff": "Ana", "Subject": "MATH1001", "DI hrs/wk": "10", "Block": "1"},
+               {"Staff": "Ana", "Subject": "MATH1001", "DI hrs/wk": "16", "Block": "2"})
+    ad = adj({"Staff": "Ana", "Type": cfg.HIGHER_DUTIES, "Acting role": "Subject Coordinator", "Block": "1"},
+             {"Staff": "Ana", "Type": cfg.HIGHER_DUTIES, "Acting role": "Subject Coordinator", "Block": "2",
+              "Weeks": "2"})
+    g, over = grid(st_, al, ad)
+    r = g.iloc[0]
+    assert r["AB1"] == "MATH1001 · Acting SC 6h" and r["AB1 h"] == 16
+    assert r["AB2"] == "MATH1001 · Acting SC 6h (2 wk)" and r["AB2 h"] == 22
+    assert over == {("Ana", "AB2")}                                         # kept all teaching while acting
+
+
+def test_grid_limit_scales_by_fte_and_casuals_are_never_over():
+    st_ = staff({"Staff": "Half", "FTE": "0.5"}, {"Staff": "Cas", "Role": "Teacher (Casual)"})
+    al = alloc({"Staff": "Half", "DI hrs/wk": "10", "Block": "1"},
+               {"Staff": "Cas", "DI hrs/wk": "40", "Block": "1"})
+    g, over = grid(st_, al)
+    assert over == {("Half", "AB1")}
+    assert g.set_index("Staff").loc["Cas", "AB1 h"] == 40
+
+
+def test_grid_summer_blocks_and_inactive_staff():
+    st_ = staff({"Staff": "Ana"}, {"Staff": "Gone", "Active": "FALSE"})
+    al = alloc({"Staff": "Ana", "Session": "26 SUM", "Subject": "JAN", "DI hrs/wk": "4", "Block": "2"},
+               {"Staff": "Ana", "Session": "26 SUM", "Subject": "NOV", "DI hrs/wk": "4", "Block": "1"},
+               {"Staff": "Ana", "Session": "27 SUM", "Subject": "NEXT", "DI hrs/wk": "4", "Block": "2"})
+    g, _ = grid(st_, al)
+    assert list(g["Staff"]) == ["Ana"]
+    assert g.iloc[0]["SU2"] == "JAN" and g.iloc[0]["SU1"] == "NOV"
+
+
+@pytest.mark.parametrize("day, label", [("2026-03-02", "AB1"), ("2026-03-22", "AB1"),
+                                        ("2026-03-23", None), ("2026-01-12", "SU2")])
+def test_current_block_follows_the_calendar(day, label):
+    c = cal({"Session": "26 AUT", "Block": "1", "Start date": "2026-03-02"},
+            {"Session": "26 SUM", "Block": "2", "Start date": "2026-01-12"})            # 3 weeks each
+    assert rules.current_block(c, "26", pd.Timestamp(day)) == label
+
+
+# --------------------------------------------------------------------------
 # summary / helpers
 # --------------------------------------------------------------------------
 

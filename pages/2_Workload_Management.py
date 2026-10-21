@@ -326,8 +326,11 @@ with tab_dash:
             st.warning(f"No blocks in the 📅 Calendar for 20{yy} yet — every hour counts as zero "
                        "until the blocks and their teaching weeks are entered.")
 
+        grid, over = rules.year_grid(staff_df, alloc_df, adj_df, yy)
+        over = {(n_, lb) for n_, lb in over if n_ in set(summary["Staff"])}
+
         n = summary["Status"].value_counts()
-        m = st.columns(6)
+        m = st.columns(7)
         m[0].metric("Staff", len(summary))
         m[1].metric(rules.STATUS_ON, int(n.get(rules.STATUS_ON, 0)),
                     help=f"Projected year within ±{cfg.ON_TRACK_TOLERANCE:.0%} of the target.")
@@ -340,6 +343,9 @@ with tab_dash:
         m[5].metric("Summer hrs needed", f"{summer.sum():,.0f}",
                     delta=f"{confirmed:,.0f} confirmed" if summer.sum() else None, delta_color="off",
                     help="From the 🎯 Year plan: summer teaching hours needed to make up underloads.")
+        m[6].metric("Blocks over limit", len(over),
+                    help="Blocks where someone's hrs/wk (teaching + duties) is above their role's "
+                    "weekly limit × FTE — even if their year is on track. Casuals have no limit.")
 
         status_filter = st.multiselect(
             "Show", rules.STATUSES, placeholder="Everyone — or pick a status",
@@ -347,91 +353,151 @@ with tab_dash:
         )
         shown = summary[summary["Status"].isin(status_filter)] if status_filter else summary
 
-        # the year per person: teaching by discipline, then HDA / other duties
-        long = [
-            {"Staff": r["Staff"], "Part": d, "Hours": h}
-            for _, r in shown.iterrows() for d, h in r["by_discipline"].items()
-        ] + [
-            {"Staff": r["Staff"], "Part": rules.DUTIES, "Hours": r["Duties"]}
-            for _, r in shown.iterrows() if r["Duties"]
-        ] + [
-            {"Staff": r["Staff"], "Part": _OTHER, "Hours": r["Other"]}
-            for _, r in shown.iterrows() if r["Other"]
-        ]
-        if long:
-            parts = sorted({x["Part"] for x in long} - {rules.DUTIES, _OTHER})
-            colours = [_PALETTE[i % len(_PALETTE)] for i in range(len(parts))]
-            y = alt.Y("Staff:N", sort=list(shown.sort_values("Total", ascending=False)["Staff"]),
-                      title=None)
-            bars = alt.Chart(pd.DataFrame(long)).mark_bar().encode(
-                y=y,
-                x=alt.X("sum(Hours):Q", title=f"Hours in 20{yy} (projected)"),
-                color=alt.Color("Part:N", title=None,
-                                scale=alt.Scale(domain=parts + [rules.DUTIES, _OTHER],
-                                                range=colours + [_DUTIES_COLOUR, _OTHER_COLOUR]),
-                                legend=alt.Legend(orient="bottom")),
-                order=alt.Order("Part:N"),
-                tooltip=["Staff", alt.Tooltip("Part:N", title="Discipline / duties"),
-                         alt.Tooltip("sum(Hours):Q", title="Hours", format=",.0f")],
-            )
-            targets = shown[shown["Target"].notna()][["Staff", "Target", "To date"]]
-            target_tick = alt.Chart(targets).mark_tick(color="black", thickness=2, size=18).encode(
-                y=y, x="Target:Q", tooltip=[alt.Tooltip("Target:Q", format=",.0f")])
-            done_tick = alt.Chart(shown[["Staff", "To date"]]).mark_point(
-                shape="triangle-down", filled=True, color="black", size=60, yOffset=-10,
-            ).encode(y=y, x="To date:Q", tooltip=[alt.Tooltip("To date:Q", format=",.0f")])
-            chart = alt.layer(bars, target_tick, done_tick).properties(height=alt.Step(30))
-            st.altair_chart(chart, use_container_width=True)
-            st.caption(
-                "Bars: each person's projected year — teaching by discipline, then "
-                f"{rules.DUTIES} in grey and {_OTHER.lower()} hours (🎯 Year plan) in light grey. "
-                "Black tick: annual target. ▼: hours to date "
-                f"(as at {as_at:%d/%m/%Y})."
-            )
+        # the year grid: one row per person, what they do and hrs/wk in each
+        # block, in calendar order, then the year against the target
+        labels = rules.grid_labels()
+        now = rules.current_block(cal_df, yy, as_at)
+        totals = shown.drop_duplicates("Staff").set_index("Staff")[["Target", "Total", "Variance", "Status"]]
+        g = (grid[grid["Staff"].isin(shown["Staff"])].drop_duplicates("Staff").join(totals, on="Staff")
+             .sort_values("Staff").reset_index(drop=True))
 
-        order = {s: i for i, s in enumerate([rules.STATUS_OVER, rules.STATUS_UNDER, rules.STATUS_ON,
-                                             rules.STATUS_CASUAL])}
-        table = shown.assign(_o=shown["Status"].map(order)).sort_values(["_o", "Staff"])
-        hours = lambda label, help_: st.column_config.NumberColumn(label, format="%.0f", help=help_)  # noqa: E731
-        st.dataframe(
-            table[["Status", "Staff", "Role", "FTE", "Target", "Teaching", "Duties", "Other", "Total",
-                   "Variance", "To date", "Left", "Avg hrs/wk", "Plan", "Summer hrs needed", "Likelihood",
-                   *cfg.SESSIONS, "Disciplines", "Adjustments", "Supervisor"]],
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "Target": hours("Target (h)", f"The 🎯 Year plan's target if set, otherwise role DI hrs/wk "
-                                f"× FTE × {cfg.ANNUAL_WEEKS:g} weeks."),
-                "Other": hours("Other allocated (h)", "Hours allocated outside the teaching lines — e.g. "
-                               "imported from the load tracking spreadsheet (🎯 Year plan)."),
-                "Plan": st.column_config.TextColumn("Plan?", width="small",
-                                                    help="Articulated plan if underloaded (🎯 Year plan)."),
-                "Summer hrs needed": hours("Summer hrs needed", "From the 🎯 Year plan."),
-                "Teaching": hours("Teaching (h)", "DI hrs/wk × the teaching weeks of each block, every "
-                                  "discipline and session added up."),
-                "Duties": hours(f"{rules.DUTIES} (h)", "Higher duties (the DI hours an acting role "
-                                "doesn't teach) plus other duties, for the weeks they cover."),
-                "Total": hours("Total (h)", "Projected year: teaching + HDA / other duties + other "
-                               "allocated."),
-                "Variance": hours("± Target (h)", "Total − target. Positive = over."),
-                "To date": hours("To date (h)", "Teaching + duties in the teaching weeks up to the "
-                                 "'As at' date."),
-                "Left": hours("Left (h)", "Target − to date: hours still to reach the target by year end."),
-                "Avg hrs/wk": st.column_config.NumberColumn(
-                    "Avg hrs/wk", format="%.1f",
-                    help=f"Total ÷ {cfg.ANNUAL_WEEKS:g} weeks — comparable with the role's "
-                    "DI hrs/wk (16 for a full-time Teacher).",
-                ),
-                **{s: hours(f"{s} (h)", f"Teaching + duties in {yy} {s}.") for s in cfg.SESSIONS},
-                "Disciplines": st.column_config.TextColumn(width="medium"),
-                "Adjustments": st.column_config.TextColumn("HDA / other duties", width="medium"),
-            },
-        )
+        def _grid_css(df: pd.DataFrame) -> pd.DataFrame:
+            css = pd.DataFrame("", index=df.index, columns=df.columns)
+            if now:
+                css[[now, f"{now} h"]] = "background-color: rgba(46, 160, 67, 0.14)"
+            for i, name in df["Staff"].items():
+                for lb in labels:
+                    if (name, lb) in over:
+                        css.loc[i, f"{lb} h"] = "background-color: rgba(245, 133, 24, 0.45); font-weight: 600"
+            return css
+
+        # numbers as text, so empty blocks and casuals' target show blank rather than "None"
+        def _txt(fmt: str):
+            return lambda v: "" if v is None or pd.isna(v) else format(v, fmt)
+
+        for lb in labels:
+            g[f"{lb} h"] = g[f"{lb} h"].map(_txt("g"))
+        g["Target"], g["Total"], g["Variance"] = (g["Target"].map(_txt(",.0f")), g["Total"].map(_txt(",.0f")),
+                                                 g["Variance"].map(_txt("+,.0f")))
+        styled = g.style.apply(_grid_css, axis=None)
+        starts = {(b["Session"], b["Block"]): b for b in blocks}
+
+        def _block_help(session: str, block: str) -> str:
+            b = starts.get((f"{yy} {session}", block))
+            when = f"starts {b['start']:%d/%m/%Y}, {b['weeks']:g} weeks" if b and b["start"] is not None \
+                else "no dates in the 📅 Calendar"
+            return f"{yy} {session} block {block}: {when}."
+
+        grid_config = {
+            "Staff": st.column_config.TextColumn("Name", pinned=True),
+            "Role": st.column_config.TextColumn("Role", pinned=True),
+            "Program": st.column_config.TextColumn("Program", pinned=True, help="Home discipline (👥 Staff)."),
+            "Target": st.column_config.TextColumn("Target (h)"),
+            "Total": st.column_config.TextColumn("Total (h)", help="Projected year, incl. other allocated hours."),
+            "Variance": st.column_config.TextColumn("± Target (h)"),
+        }
+        for s, b, lb in cfg.GRID_BLOCKS:
+            mark = " (now)" if lb == now else ""
+            grid_config[lb] = st.column_config.TextColumn(lb + mark, help=_block_help(s, b))
+            grid_config[f"{lb} h"] = st.column_config.Column(
+                "h/wk", width="small",
+                help=f"{lb}: DI hrs/wk taught + duty hrs/wk. Orange = above the role's limit × FTE.")
+        st.dataframe(styled, hide_index=True, use_container_width=True, column_config=grid_config,
+                     height=min(38 + 35 * len(g), 640))
         st.caption(
-            f"{rules.STATUS_ON} — projected year within ±{cfg.ON_TRACK_TOLERANCE:.0%} of the target. "
-            f"{rules.STATUS_OVER} / {rules.STATUS_UNDER} — outside it. "
-            "One row per person, however many disciplines they teach in."
+            "Each block: subjects (tagged with the program when it isn't the person's own) and duties "
+            "such as *Acting SC*, then hours per week. 🟧 Orange hours = above the role's weekly limit × "
+            "FTE in that block, even if the year averages out. "
+            + (f"🟩 Green = the block the As at date falls in ({now}). " if now else "")
+            + "Other allocated hours (🎯 Year plan) have no block, so they count only in Total."
         )
+
+        with st.expander("Chart and full table"):
+            # the year per person: teaching by discipline, then HDA / other duties
+            long = [
+                {"Staff": r["Staff"], "Part": d, "Hours": h}
+                for _, r in shown.iterrows() for d, h in r["by_discipline"].items()
+            ] + [
+                {"Staff": r["Staff"], "Part": rules.DUTIES, "Hours": r["Duties"]}
+                for _, r in shown.iterrows() if r["Duties"]
+            ] + [
+                {"Staff": r["Staff"], "Part": _OTHER, "Hours": r["Other"]}
+                for _, r in shown.iterrows() if r["Other"]
+            ]
+            if long:
+                parts = sorted({x["Part"] for x in long} - {rules.DUTIES, _OTHER})
+                colours = [_PALETTE[i % len(_PALETTE)] for i in range(len(parts))]
+                y = alt.Y("Staff:N", sort=list(shown.sort_values("Total", ascending=False)["Staff"]),
+                          title=None)
+                bars = alt.Chart(pd.DataFrame(long)).mark_bar().encode(
+                    y=y,
+                    x=alt.X("sum(Hours):Q", title=f"Hours in 20{yy} (projected)"),
+                    color=alt.Color("Part:N", title=None,
+                                    scale=alt.Scale(domain=parts + [rules.DUTIES, _OTHER],
+                                                    range=colours + [_DUTIES_COLOUR, _OTHER_COLOUR]),
+                                    legend=alt.Legend(orient="bottom")),
+                    order=alt.Order("Part:N"),
+                    tooltip=["Staff", alt.Tooltip("Part:N", title="Discipline / duties"),
+                             alt.Tooltip("sum(Hours):Q", title="Hours", format=",.0f")],
+                )
+                targets = shown[shown["Target"].notna()][["Staff", "Target", "To date"]]
+                target_tick = alt.Chart(targets).mark_tick(color="black", thickness=2, size=18).encode(
+                    y=y, x="Target:Q", tooltip=[alt.Tooltip("Target:Q", format=",.0f")])
+                done_tick = alt.Chart(shown[["Staff", "To date"]]).mark_point(
+                    shape="triangle-down", filled=True, color="black", size=60, yOffset=-10,
+                ).encode(y=y, x="To date:Q", tooltip=[alt.Tooltip("To date:Q", format=",.0f")])
+                chart = alt.layer(bars, target_tick, done_tick).properties(height=alt.Step(30))
+                st.altair_chart(chart, use_container_width=True)
+                st.caption(
+                    "Bars: each person's projected year — teaching by discipline, then "
+                    f"{rules.DUTIES} in grey and {_OTHER.lower()} hours (🎯 Year plan) in light grey. "
+                    "Black tick: annual target. ▼: hours to date "
+                    f"(as at {as_at:%d/%m/%Y})."
+                )
+
+            order = {s: i for i, s in enumerate([rules.STATUS_OVER, rules.STATUS_UNDER, rules.STATUS_ON,
+                                                 rules.STATUS_CASUAL])}
+            table = shown.assign(_o=shown["Status"].map(order)).sort_values(["_o", "Staff"])
+            hours = lambda label, help_: st.column_config.NumberColumn(label, format="%.0f", help=help_)  # noqa: E731
+            st.dataframe(
+                table[["Status", "Staff", "Role", "FTE", "Target", "Teaching", "Duties", "Other", "Total",
+                       "Variance", "To date", "Left", "Avg hrs/wk", "Plan", "Summer hrs needed", "Likelihood",
+                       *cfg.SESSIONS, "Disciplines", "Adjustments", "Supervisor"]],
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Target": hours("Target (h)", f"The 🎯 Year plan's target if set, otherwise role DI hrs/wk "
+                                    f"× FTE × {cfg.ANNUAL_WEEKS:g} weeks."),
+                    "Other": hours("Other allocated (h)", "Hours allocated outside the teaching lines — e.g. "
+                                   "imported from the load tracking spreadsheet (🎯 Year plan)."),
+                    "Plan": st.column_config.TextColumn("Plan?", width="small",
+                                                        help="Articulated plan if underloaded (🎯 Year plan)."),
+                    "Summer hrs needed": hours("Summer hrs needed", "From the 🎯 Year plan."),
+                    "Teaching": hours("Teaching (h)", "DI hrs/wk × the teaching weeks of each block, every "
+                                      "discipline and session added up."),
+                    "Duties": hours(f"{rules.DUTIES} (h)", "Higher duties (the DI hours an acting role "
+                                    "doesn't teach) plus other duties, for the weeks they cover."),
+                    "Total": hours("Total (h)", "Projected year: teaching + HDA / other duties + other "
+                                   "allocated."),
+                    "Variance": hours("± Target (h)", "Total − target. Positive = over."),
+                    "To date": hours("To date (h)", "Teaching + duties in the teaching weeks up to the "
+                                     "'As at' date."),
+                    "Left": hours("Left (h)", "Target − to date: hours still to reach the target by year end."),
+                    "Avg hrs/wk": st.column_config.NumberColumn(
+                        "Avg hrs/wk", format="%.1f",
+                        help=f"Total ÷ {cfg.ANNUAL_WEEKS:g} weeks — comparable with the role's "
+                        "DI hrs/wk (16 for a full-time Teacher).",
+                    ),
+                    **{s: hours(f"{s} (h)", f"Teaching + duties in {yy} {s}.") for s in cfg.SESSIONS},
+                    "Disciplines": st.column_config.TextColumn(width="medium"),
+                    "Adjustments": st.column_config.TextColumn("HDA / other duties", width="medium"),
+                },
+            )
+            st.caption(
+                f"{rules.STATUS_ON} — projected year within ±{cfg.ON_TRACK_TOLERANCE:.0%} of the target. "
+                f"{rules.STATUS_OVER} / {rules.STATUS_UNDER} — outside it. "
+                "One row per person, however many disciplines they teach in."
+            )
 
         # discipline view
         with st.expander("By discipline"):

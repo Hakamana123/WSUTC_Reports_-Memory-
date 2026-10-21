@@ -330,6 +330,98 @@ def summarise_year(
     return pd.DataFrame(rows)
 
 
+# --------------------------------------------------------------------------
+# year grid: one row per person, one column per block
+# --------------------------------------------------------------------------
+
+
+def grid_labels() -> list[str]:
+    return [label for _, _, label in cfg.GRID_BLOCKS]
+
+
+def current_block(calendar: pd.DataFrame, yy: str, as_at: pd.Timestamp) -> str | None:
+    """The grid label of the block `as_at` falls in, or None (a break, or no dates)."""
+    labels = {(f"{yy} {s}", b): label for s, b, label in cfg.GRID_BLOCKS}
+    day = pd.Timestamp(as_at).normalize()
+    for blk in calendar_blocks(calendar, yy):
+        if blk["start"] is None or blk["weeks"] <= 0:
+            continue
+        if blk["start"] <= day < blk["start"] + pd.Timedelta(days=7 * blk["weeks"]):
+            return labels.get((blk["Session"], blk["Block"]))
+    return None
+
+
+def _duty_label(a, hours: float) -> str:
+    acting = _acting(a)
+    what = f"Acting {cfg.ROLE_SHORT.get(acting, acting)}" if acting else cfg.ADJUSTMENT_SHORT.get(a["Type"], a["Type"])
+    hrs = f" {hours:g}h" if hours else ""
+    weeks = f" ({num(a['Weeks']):g} wk)" if num(a["Weeks"]) > 0 else ""
+    return what + hrs + weeks
+
+
+def person_blocks(staff: dict, allocations: pd.DataFrame, adjustments: pd.DataFrame, yy: str) -> dict[str, dict]:
+    """{grid label: {"what", "hours", "over"}} for one person's blocks in year `yy`.
+
+    what  = subject codes (tagged with the program when it isn't their home
+            discipline), then duties ("Acting SC");
+    hours = DI hrs/wk taught + duty hrs/wk in that block — a part-block duty
+            counts in full, as its weeks overlap the teaching from the start;
+    over  = hours above the role's limit × FTE. Casuals have no limit, so are
+            never over. Blocks with nothing in them are left out."""
+    name, role, home = staff["Staff"], staff.get("Role", ""), str(staff.get("Home discipline", "")).strip()
+    f = fte(staff.get("FTE"))
+    limit = role_limit(role, f)
+    alloc = allocations[allocations["Staff"] == name]
+    adj = adjustments[adjustments["Staff"] == name]
+    out = {}
+    for s, b, label in cfg.GRID_BLOCKS:
+        session = f"{yy} {s}"
+        subjects, duties, hours = [], [], 0.0
+        for _, r in alloc[alloc["Session"] == session].iterrows():
+            if not in_block(r["Block"], b):
+                continue
+            hours += num(r["DI hrs/wk"])
+            disc = str(r["Discipline"]).strip()
+            subj = str(r["Subject"]).strip() or disc or "(no subject)"
+            if disc and home and disc != home and subj != disc:
+                subj += f" ({disc})"
+            if subj not in subjects:
+                subjects.append(subj)
+        for _, a in adj[adj["Session"] == session].iterrows():
+            if not in_block(a["Block"], b):
+                continue
+            h = duty_hours_per_week(a, role, f)
+            hours += h
+            duties.append(_duty_label(a, h))
+        if subjects or duties:
+            out[label] = {"what": " · ".join([", ".join(subjects)] * bool(subjects) + duties),
+                          "hours": hours, "over": limit is not None and hours > limit + 1e-9}
+    return out
+
+
+def year_grid(staff: pd.DataFrame, allocations: pd.DataFrame, adjustments: pd.DataFrame,
+              yy: str) -> tuple[pd.DataFrame, set[tuple[str, str]]]:
+    """(grid, over) for every active staff member in year `yy`.
+
+    grid: Staff, Role, Program (home discipline), then per block in calendar
+    order "<label>" (what they do) and "<label> h" (hrs/wk; blank if nothing).
+    over: {(name, label)} for blocks above the role's weekly limit."""
+    active = staff[staff["Active"].str.upper() != "FALSE"]
+    rows, over = [], set()
+    for s in active.to_dict("records"):
+        blocks = person_blocks(s, allocations, adjustments, yy)
+        row = {"Staff": s["Staff"], "Role": s.get("Role", ""), "Program": s.get("Home discipline", "")}
+        for label in grid_labels():
+            cell = blocks.get(label)
+            row[label] = cell["what"] if cell else ""
+            row[f"{label} h"] = cell["hours"] if cell else None
+            if cell and cell["over"]:
+                over.add((s["Staff"], label))
+        rows.append(row)
+    cols = ["Staff", "Role", "Program"] + [c for label in grid_labels() for c in (label, f"{label} h")]
+    return pd.DataFrame(rows, columns=cols), over
+
+
 def orphans(staff: pd.DataFrame, table: pd.DataFrame) -> list[str]:
     """Names on allocation / adjustment rows that aren't on the staff list."""
     known = set(staff["Staff"])

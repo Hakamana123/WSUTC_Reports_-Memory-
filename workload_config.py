@@ -138,3 +138,26 @@ ADJUSTMENT_HELP = (
     "Weeks: leave blank for the whole block, or enter how many weeks of the block it covers "
     "(counted from the block's start)."
 )
+
+# --- Year grid ---------------------------------------------------------------
+# The dashboard grid's columns, in calendar order: Summer B2 (Jan) first,
+# Summer B1 (Nov) last. (session, block, column label)
+GRID_BLOCKS: list[tuple[str, str, str]] = (
+    [("SUM", "2", "SU2")]
+    + [("AUT", b, f"AB{b}") for b in BLOCKS]
+    + [("SPR", b, f"SB{b}") for b in BLOCKS]
+    + [("SUM", "1", "SU1")]
+)
+
+# Short names for the grid's cells.
+ROLE_SHORT: dict[str, str] = {
+    "Associate Director": "AD",
+    "Program Coordinator": "PC",
+    "Subject Coordinator": "SC",
+}
+ADJUSTMENT_SHORT: dict[str, str] = {
+    HIGHER_DUTIES: "HDA",
+    "Curriculum development relief": "Curric dev",
+    "Travel time between campuses": "Travel",
+    "Other approved release": "Release",
+}

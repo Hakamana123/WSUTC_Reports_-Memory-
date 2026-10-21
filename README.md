@@ -21,7 +21,7 @@ Axes* (Koh & Roffey, Sept 2026).
 | `workload_store.py` — staff / teaching / duties / calendar tabs + change log | done |
 | `pages/2_Workload_Management.py` — supervisor dashboard and editors | live |
 
-131 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
+141 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
 `python scripts/smoke_test_sheet.py`.
 
 This is a **multipage app** (Streamlit's native `pages/` convention, same as
@@ -92,7 +92,12 @@ The sidebar picks the year and an "as at" date.
   sheet, headers found by name; people matched by Employee No then name;
   new people added as Teacher (Ongoing); a newer version refreshes the
   plan fields. Warns about look-alike names and people on only one sheet.
-- **Dashboard** — per person: target, teaching, HDA / other duties, other allocated, projected
+- **Dashboard** — the year grid first: one row per person, and per block in
+  calendar order (SU2, AB1–4, SB1–4, SU1) their subjects (tagged with the
+  program when it isn't their home one) and duties (*Acting SC*), then hrs/wk.
+  Hours above the role's weekly limit × FTE are orange (casuals have no
+  limit); the block the As at date falls in is green; target, total, ± and
+  status on the right. Under it, per person: target, teaching, HDA / other duties, other allocated, projected
   total, ± target, to date, left (target − to date), average hrs/wk, and
   hours per session. 🟢 on track (within ±5 %) · 🟠 off track — over ·
   🟡 off track — under; filter by status, supervisor or discipline. The chart
