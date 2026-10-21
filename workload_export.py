@@ -1,8 +1,8 @@
 """The dashboard's year grid as an Excel workbook: Name / Role / Program, then
 a subjects column and an hours column (the block's total) per block in
-calendar order, then target, total, ± and status. Hours are tinted as on
-screen — blue by how full the block is, orange over the limit, grey for
-casuals — and the current block's header is green. Names and the header row
+calendar order, then target, total, ± and status. Hours are tinted with
+the dashboard's band colours — healthy, light, over, casual — and the
+current block's header is green. Names and the header row
 are frozen. Pure: a DataFrame in, bytes out.
 """
 
@@ -15,8 +15,9 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-ORANGE = PatternFill("solid", fgColor="F8C9A0")
-GREY = PatternFill("solid", fgColor="EBEBEB")
+import workload_config as cfg
+import workload_rules as rules
+
 GREEN = PatternFill("solid", fgColor="D5EFD9")
 HEADER = PatternFill("solid", fgColor="EDEDED")
 
@@ -35,17 +36,12 @@ def _value(v):
     return v
 
 
-def _blue(load: float) -> PatternFill:
-    """White → the dashboard's blue (76, 120, 168) as the block fills up."""
-    a = 0.06 + 0.34 * min(max(load, 0.0), 1.0)
-    rgb = "".join(f"{round(255 - (255 - c) * a):02X}" for c in (76, 120, 168))
+def band_fill(band: str) -> PatternFill:
+    """The band's colour blended onto white, as the dashboard tints it."""
+    hex_ = cfg.BAND_COLOURS[band].lstrip("#")
+    a = {cfg.BAND_OVER: 0.5, cfg.BAND_CASUAL: 0.18}.get(band, 0.3)
+    rgb = "".join(f"{round(255 - (255 - int(hex_[i:i + 2], 16)) * a):02X}" for i in (0, 2, 4))
     return PatternFill("solid", fgColor=rgb)
-
-
-def _fill(load: float | None) -> PatternFill:
-    if load is None:
-        return GREY
-    return ORANGE if load > 1 + 1e-9 else _blue(load)
 
 
 def grid_xlsx(grid: pd.DataFrame, labels: list[str], load: dict[tuple[str, str], float | None],
@@ -72,9 +68,9 @@ def grid_xlsx(grid: pd.DataFrame, labels: list[str], load: dict[tuple[str, str],
         for j, (c, v) in enumerate(zip(cols, row), 1):
             cell = ws.cell(row=i, column=j, value=_value(v))
             if c in hours and (name, hours[c]) in load:
-                cell.fill = _fill(load[(name, hours[c])])
-                cell.number_format = "#,##0"
-                if cell.fill is ORANGE:
+                band = rules.block_band(load[(name, hours[c])])
+                cell.fill, cell.number_format = band_fill(band), "#,##0"
+                if band == cfg.BAND_OVER:
                     cell.font = Font(bold=True)
 
     for j, c in enumerate(cols, 1):

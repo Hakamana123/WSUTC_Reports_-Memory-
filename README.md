@@ -22,7 +22,7 @@ Axes* (Koh & Roffey, Sept 2026).
 | `workload_export.py` — the year grid as an Excel workbook | done |
 | `pages/2_Workload_Management.py` — supervisor dashboard and editors | live |
 
-145 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
+151 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
 `python scripts/smoke_test_sheet.py`.
 
 This is a **multipage app** (Streamlit's native `pages/` convention, same as
@@ -93,12 +93,16 @@ The sidebar picks the year and an "as at" date.
   sheet, headers found by name; people matched by Employee No then name;
   new people added as Teacher (Ongoing); a newer version refreshes the
   plan fields. Warns about look-alike names and people on only one sheet.
-- **Dashboard** — the year grid first: one row per person, one column per
-  block in calendar order (SU2, AB1–4, SB1–4, SU1) showing the block's total
-  hours, then their subjects (tagged with the program when it isn't their
-  home one) and duties (*Acting SC 24h*). Cells are tinted blue by how full
-  the block is against the role's limit × FTE × its weeks, orange when over,
-  grey for casuals (no limit); ▶ marks the current block; target, total, ± and
+- **Dashboard** — in sections. **Summary**: tiles for staff, on track /
+  over / under, hours this year and blocks over limit (each with a small
+  chart across the blocks), HDA / other duties and summer hours.
+  **Work patterns**: a dot per person per block (SU2, AB1–4, SB1–4, SU1),
+  coloured by how full the block is against the role's limit × FTE × its
+  weeks — healthy (75–100 %), light, over, or casual (no limit).
+  **Year grid**: one row per person, one column per block showing its total
+  hours, then subjects (tagged with the program when it isn't their home
+  one) and duties (*Acting SC 24h*), tinted in the same colours; ▶ marks the
+  current block; target, total, ± and
   status on the right. Click a block to edit that person's teaching and duties
   for it (or their name for the whole year) in the same editors as the tabs;
   **Export the grid** downloads it as Excel with the same colours. The UI says

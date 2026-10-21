@@ -373,38 +373,84 @@ with tab_dash:
         load = {k: v for k, v in load.items() if k[0] in set(summary["Staff"])}
         over = rules.over_limit(load)
 
-        n = summary["Status"].value_counts()
-        m = st.columns(7)
-        m[0].metric("Staff", len(summary))
-        m[1].metric(rules.STATUS_ON, int(n.get(rules.STATUS_ON, 0)),
-                    help=f"Projected year within ±{cfg.ON_TRACK_TOLERANCE:.0%} of the target.")
-        m[2].metric(rules.STATUS_OVER, int(n.get(rules.STATUS_OVER, 0)))
-        m[3].metric(rules.STATUS_UNDER, int(n.get(rules.STATUS_UNDER, 0)))
-        m[4].metric(f"{rules.DUTIES} (h)", f"{summary['Duties'].sum():,.0f}",
-                    help="Higher duties and other duties across everyone shown, for the year.")
+        labels = rules.grid_labels()
+        in_view_grid = grid[grid["Staff"].isin(summary["Staff"])]
+        per_block = [float(pd.to_numeric(in_view_grid[f"{lb} h"], errors="coerce").sum()) for lb in labels]
+        over_per_block = [sum(1 for _, lb_ in over if lb_ == lb) for lb in labels]
         summer = summary["Summer hrs needed"].fillna(0)
         confirmed = summer[summary["Likelihood"] == "Confirmed"].sum()
-        m[5].metric("Summer hrs needed", f"{summer.sum():,.0f}",
-                    delta=f"{confirmed:,.0f} confirmed" if summer.sum() else None, delta_color="off",
-                    help="From the 🎯 Year plan: summer teaching hours needed to make up underloads.")
-        m[6].metric("Blocks over limit", len(over),
-                    help="Blocks where someone's hours (teaching + duties) are above their role's "
-                    "limit × FTE × the block's weeks — even if their year is on track. Casuals have no limit.")
+        n = summary["Status"].value_counts()
+
+        st.subheader("Summary", divider="gray")
+        r1, r2 = st.columns(4), st.columns(4)
+        r1[0].metric("Staff", len(summary), border=True)
+        r1[1].metric(rules.STATUS_ON, int(n.get(rules.STATUS_ON, 0)), border=True,
+                     help=f"Projected year within ±{cfg.ON_TRACK_TOLERANCE:.0%} of the target.")
+        r1[2].metric(rules.STATUS_OVER, int(n.get(rules.STATUS_OVER, 0)), border=True)
+        r1[3].metric(rules.STATUS_UNDER, int(n.get(rules.STATUS_UNDER, 0)), border=True)
+        r2[0].metric("Hours this year", f"{summary['Total'].sum():,.0f}", border=True,
+                     chart_data=per_block, chart_type="area",
+                     help="Projected hours across everyone shown. Chart: hours in each block, SU2 → SU1 "
+                     "(other allocated hours have no block, so aren't in it).")
+        r2[1].metric("Blocks over limit", len(over), border=True, chart_data=over_per_block, chart_type="bar",
+                     help="Blocks where someone's hours (teaching + duties) are above their role's limit × FTE "
+                     "× the block's weeks — even if their year is on track. Casuals have no limit. "
+                     "Chart: how many in each block, SU2 → SU1.")
+        r2[2].metric(f"{rules.DUTIES} (h)", f"{summary['Duties'].sum():,.0f}", border=True, height="stretch",
+                     help="Higher duties and other duties across everyone shown, for the year.")
+        r2[3].metric("Summer hrs needed", f"{summer.sum():,.0f}", border=True, height="stretch",
+                     delta=f"{confirmed:,.0f} confirmed" if summer.sum() else None, delta_color="off",
+                     help="From the 🎯 Year plan: summer teaching hours needed to make up underloads.")
 
         status_filter = st.multiselect(
             "Show", rules.STATUSES, placeholder="Everyone — or pick a status",
-            help="Filter the chart and table by colour.",
+            help="Filter the work patterns, grid and tables by status.",
         )
         shown = summary[summary["Status"].isin(status_filter)] if status_filter else summary
 
         # the year grid: one row per person, one column per block in calendar
         # order — the block's total hours, then what they do — tinted by how
         # full the block is; then the year against the target
-        labels = rules.grid_labels()
         now = rules.current_block(cal_df, yy, as_at)
         totals = shown.drop_duplicates("Staff").set_index("Staff")[["Target", "Total", "Variance", "Status"]]
         g = (grid[grid["Staff"].isin(shown["Staff"])].drop_duplicates("Staff").join(totals, on="Staff")
              .sort_values("Staff").reset_index(drop=True))
+
+        # work patterns: a dot per person per block, coloured by how full it is
+        st.subheader("Work patterns", divider="gray")
+        bands = list(cfg.BAND_COLOURS)
+        dots = pd.DataFrame([
+            {"Staff": name, "Block": lb, "Band": rules.block_band(load[(name, lb)]),
+             "Hours": float(g.at[i, f"{lb} h"]), "What": g.at[i, lb],
+             "Of limit": "no limit" if load[(name, lb)] is None else f"{load[(name, lb)]:.0%}"}
+            for i, name in g["Staff"].items() for lb in labels if (name, lb) in load
+        ], columns=["Staff", "Block", "Band", "Hours", "What", "Of limit"])
+        y = alt.Y("Staff:N", sort=list(g["Staff"]), title=None, axis=alt.Axis(labelLimit=220))
+        x = alt.X("Block:N", sort=labels, title=None, axis=alt.Axis(orient="top", labelAngle=0, domain=False))
+        cells_bg = alt.Chart(pd.DataFrame([{"Staff": s_, "Block": lb} for s_ in g["Staff"] for lb in labels])
+                             ).mark_rect(color="#888888", opacity=0.08, stroke="white", strokeWidth=2
+                                         ).encode(x=x, y=y)
+        layers = [cells_bg]
+        if now:
+            layers.append(alt.Chart(pd.DataFrame([{"Block": now}])).mark_rect(color="#54a24b", opacity=0.12)
+                          .encode(x=x))
+        layers.append(alt.Chart(dots).mark_circle(size=260, opacity=1).encode(
+            x=x, y=y,
+            color=alt.Color("Band:N", title=None,
+                            scale=alt.Scale(domain=bands, range=list(cfg.BAND_COLOURS.values())),
+                            legend=alt.Legend(orient="bottom")),
+            tooltip=["Staff", "Block", alt.Tooltip("Hours:Q", format=",.0f"), "Of limit", "What"],
+        ))
+        st.altair_chart(alt.layer(*layers).properties(height=alt.Step(30)).configure_view(stroke=None),
+                        use_container_width=True)
+        st.caption(
+            "Each dot is a block someone works in, against their role's limit × FTE × the block's weeks: "
+            f"🟢 healthy ({cfg.BLOCK_HEALTHY_FROM:.0%}–100 %) · 🟡 light (under {cfg.BLOCK_HEALTHY_FROM:.0%}) · "
+            "🟠 over · ⚪ casual (no limit). An empty block is normal — nobody teaches every block."
+            + (f" The shaded column is the current block ({now})." if now else "")
+        )
+
+        st.subheader("Year grid", divider="gray")
 
         def _txt(fmt: str):
             # numbers as text, so blanks show blank rather than "None"
@@ -419,11 +465,11 @@ with tab_dash:
         view["Status"] = g["Status"]
 
         def _tint(v: float | None) -> str:
-            if v is None:                                   # casual, or no weeks in the Calendar
-                return "background-color: rgba(158, 158, 158, 0.16)"
-            if v > 1 + 1e-9:
-                return "background-color: rgba(245, 133, 24, 0.5); font-weight: 600"
-            return f"background-color: rgba(76, 120, 168, {0.06 + 0.34 * v:.2f})"
+            band = rules.block_band(v)
+            r, g_, b = (int(cfg.BAND_COLOURS[band][i:i + 2], 16) for i in (1, 3, 5))
+            alpha = {cfg.BAND_OVER: 0.5, cfg.BAND_CASUAL: 0.18}.get(band, 0.3)
+            bold = "; font-weight: 600" if band == cfg.BAND_OVER else ""
+            return f"background-color: rgba({r}, {g_}, {b}, {alpha}){bold}"
 
         def _grid_css(df: pd.DataFrame) -> pd.DataFrame:
             css = pd.DataFrame("", index=df.index, columns=df.columns)
@@ -438,7 +484,8 @@ with tab_dash:
 
         def _block_help(session: str, block: str) -> str:
             b = starts.get((f"{yy} {session}", block))
-            when = f"starts {b['start']:%d/%m/%Y}, {b['weeks']:g} weeks" if b and b["start"] is not None                 else "no dates in the 📅 Calendar"
+            when = (f"starts {b['start']:%d/%m/%Y}, {b['weeks']:g} weeks" if b and b["start"] is not None
+                    else "no dates in the 📅 Calendar")
             return f"{yy} {session} block {block}: {when}. Total hours, then subjects and duties."
 
         grid_config = {
@@ -457,10 +504,8 @@ with tab_dash:
                               key=f"wl_grid_{st.session_state.get('wl_grid_k', 0)}")
         st.caption(
             "Each block: its total hours (teaching + duties), then subjects — tagged with the program when "
-            "it isn't the person's own — and duties such as *Acting SC*. 🟦 The darker the blue, the closer "
-            "the block is to the role's limit × FTE × its weeks (a full-time Teacher's 4-week block: "
-            f"{cfg.ROLES[cfg.DEFAULT_ROLE] * 4:g} h). 🟧 Orange = over it, even if the year averages out. "
-            "⬜ Grey = casual (no limit). "
+            "it isn't the person's own — and duties such as *Acting SC*. Colours as in Work patterns; the limit "
+            f"for a full-time Teacher's 4-week block is {cfg.ROLES[cfg.DEFAULT_ROLE] * 4:g} h. "
             + (f"▶ marks the block the As at date falls in ({now}). " if now else "")
             + "Other allocated hours (🎯 Year plan) have no block, so they count only in Total. "
             "**Click a block to edit it; click a name to edit their whole year.**"
@@ -518,6 +563,7 @@ with tab_dash:
                            {**new_defaults, "Acting role": cfg.NOT_ACTING}, key=f"ed_cell_adj_{who}_{what}")
                 st.caption("Changes show in the grid straight away; press 💾 Save changes at the top to keep them.")
 
+        st.subheader("Detail", divider="gray")
         with st.expander("Chart and full table"):
             # the year per person: teaching by discipline, then HDA / other duties
             long = [

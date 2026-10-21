@@ -7,6 +7,7 @@ from io import BytesIO
 import pandas as pd
 from openpyxl import load_workbook
 
+import workload_config as cfg
 import workload_export as wexport
 
 
@@ -18,6 +19,7 @@ def test_grid_xlsx_keeps_layout_numbers_and_colours():
          "AB2": "BUS1002", "AB2 h": "8", "Target": "", "Total": "192", "Variance": "", "Status": "Casual"},
     ])
     load = {("Ana", "AB1"): 1.25, ("Ben", "AB1"): None, ("Ben", "AB2"): None}
+    rgb = lambda band: wexport.band_fill(band).fgColor.rgb[-6:]  # noqa: E731
     data = wexport.grid_xlsx(grid, ["AB1", "AB2"], load, now="AB2", sheet="Workload 2026")
     ws = load_workbook(BytesIO(data)).active
 
@@ -26,12 +28,12 @@ def test_grid_xlsx_keeps_layout_numbers_and_colours():
                                         "Target (h)", "Total (h)", "± Target (h)", "Status"]
     assert ws["E2"].value == 20 and ws["I2"].value == 1024 and ws["J2"].value == 448
     assert ws["F2"].value is None and ws["H3"].value is None
-    assert ws["E2"].fill.fgColor.rgb.endswith("F8C9A0")             # Ana over in AB1
-    assert ws["E3"].fill.fgColor.rgb.endswith("EBEBEB")             # casual: grey, never orange
+    assert ws["E2"].fill.fgColor.rgb.endswith(rgb(cfg.BAND_OVER)) and ws["E2"].font.bold   # Ana over in AB1
+    assert ws["E3"].fill.fgColor.rgb.endswith(rgb(cfg.BAND_CASUAL))                      # casual, never over
     assert ws["F1"].fill.fgColor.rgb.endswith("D5EFD9") and ws["G1"].fill.fgColor.rgb.endswith("D5EFD9")
     assert ws.freeze_panes == "D2"
 
 
-def test_blue_darkens_as_the_block_fills():
-    light, dark = wexport._blue(0.1).fgColor.rgb, wexport._blue(1.0).fgColor.rgb
-    assert int(dark[-6:-4], 16) < int(light[-6:-4], 16)
+def test_band_fills_are_tints_of_the_band_colours():
+    assert wexport.band_fill(cfg.BAND_OVER).fgColor.rgb[-6:] == "FAC28C"      # #f58518 at 50 % on white
+    assert len({wexport.band_fill(b).fgColor.rgb for b in cfg.BAND_COLOURS}) == len(cfg.BAND_COLOURS)

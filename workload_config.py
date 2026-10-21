@@ -161,3 +161,16 @@ ADJUSTMENT_SHORT: dict[str, str] = {
     "Travel time between campuses": "Travel",
     "Other approved release": "Release",
 }
+
+# How full a block is, as hours ÷ the role's allowance for it (limit × FTE ×
+# the block's weeks): over 1 = over; from this share up = healthy; below =
+# light. Empty blocks are normal (nobody teaches every block), so they get no
+# band. Same colours on the dot chart, the grid and the Excel export.
+BLOCK_HEALTHY_FROM: float = 0.75
+BAND_OVER, BAND_HEALTHY, BAND_LIGHT, BAND_CASUAL = "Over", "Healthy", "Light", "Casual"
+BAND_COLOURS: dict[str, str] = {
+    BAND_OVER: "#f58518",
+    BAND_HEALTHY: "#54a24b",
+    BAND_LIGHT: "#eeca3b",
+    BAND_CASUAL: "#9e9e9e",
+}

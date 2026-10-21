@@ -269,6 +269,12 @@ def test_grid_load_is_hours_over_the_blocks_allowance():
     assert load == {("Ana", "AB1"): 0.5}
 
 
+@pytest.mark.parametrize("load, band", [(None, cfg.BAND_CASUAL), (1.01, cfg.BAND_OVER), (1.0, cfg.BAND_HEALTHY),
+                                        (0.75, cfg.BAND_HEALTHY), (0.74, cfg.BAND_LIGHT), (0.0, cfg.BAND_LIGHT)])
+def test_block_band(load, band):
+    assert rules.block_band(load) == band
+
+
 def test_grid_tags_teaching_outside_the_home_program():
     st_ = staff({"Staff": "Ana", "Home discipline": "Science"})
     al = alloc({"Staff": "Ana", "Subject": "SCI1001", "Discipline": "Science", "DI hrs/wk": "8", "Block": "1"},

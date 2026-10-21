@@ -406,6 +406,16 @@ def person_blocks(staff: dict, allocations: pd.DataFrame, adjustments: pd.DataFr
     return out
 
 
+def block_band(load: float | None) -> str:
+    """Over / Healthy / Light for a block's load; Casual for no load (no limit,
+    or no weeks in the Calendar)."""
+    if load is None:
+        return cfg.BAND_CASUAL
+    if load > 1 + 1e-9:
+        return cfg.BAND_OVER
+    return cfg.BAND_HEALTHY if load >= cfg.BLOCK_HEALTHY_FROM - 1e-9 else cfg.BAND_LIGHT
+
+
 def over_limit(load: dict[tuple[str, str], float | None]) -> set[tuple[str, str]]:
     """The (name, label) blocks whose load is above the role's allowance."""
     return {k for k, v in load.items() if v is not None and v > 1 + 1e-9}
