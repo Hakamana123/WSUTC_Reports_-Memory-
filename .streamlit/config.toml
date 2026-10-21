@@ -1,0 +1,5 @@
+# App-wide theme: Western Sydney University crimson (#990033, WSU Digital
+# Brand Guidelines) for buttons, tabs, toggles and links. Light and dark
+# modes both follow the viewer's setting.
+[theme]
+primaryColor = "#990033"

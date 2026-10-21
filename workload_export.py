@@ -39,7 +39,7 @@ def _value(v):
 def band_fill(band: str) -> PatternFill:
     """The band's colour blended onto white, as the dashboard tints it."""
     hex_ = cfg.BAND_COLOURS[band].lstrip("#")
-    a = {cfg.BAND_OVER: 0.5, cfg.BAND_CASUAL: 0.18}.get(band, 0.3)
+    a = {cfg.BAND_OVER: 0.35, cfg.BAND_CASUAL: 0.18}.get(band, 0.3)
     rgb = "".join(f"{round(255 - (255 - int(hex_[i:i + 2], 16)) * a):02X}" for i in (0, 2, 4))
     return PatternFill("solid", fgColor=rgb)
 

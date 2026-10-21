@@ -169,7 +169,7 @@ ADJUSTMENT_SHORT: dict[str, str] = {
 BLOCK_HEALTHY_FROM: float = 0.75
 BAND_OVER, BAND_HEALTHY, BAND_LIGHT, BAND_CASUAL = "Over", "Healthy", "Light", "Casual"
 BAND_COLOURS: dict[str, str] = {
-    BAND_OVER: "#f58518",
+    BAND_OVER: "#990033",          # WSU crimson
     BAND_HEALTHY: "#54a24b",
     BAND_LIGHT: "#eeca3b",
     BAND_CASUAL: "#9e9e9e",

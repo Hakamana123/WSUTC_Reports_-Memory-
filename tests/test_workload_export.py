@@ -35,5 +35,5 @@ def test_grid_xlsx_keeps_layout_numbers_and_colours():
 
 
 def test_band_fills_are_tints_of_the_band_colours():
-    assert wexport.band_fill(cfg.BAND_OVER).fgColor.rgb[-6:] == "FAC28C"      # #f58518 at 50 % on white
+    assert wexport.band_fill(cfg.BAND_OVER).fgColor.rgb[-6:] == "DBA6B8"      # #990033 at 35 % on white
     assert len({wexport.band_fill(b).fgColor.rgb for b in cfg.BAND_COLOURS}) == len(cfg.BAND_COLOURS)

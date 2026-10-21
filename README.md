@@ -20,9 +20,10 @@ Axes* (Koh & Roffey, Sept 2026).
 | `workload_config.py` / `workload_rules.py` — roles, annual targets, year maths | done |
 | `workload_store.py` — staff / teaching / duties / calendar tabs + change log | done |
 | `workload_export.py` — the year grid as an Excel workbook | done |
+| `workload_upload.py` — bulk staff / teaching upload from Excel | done |
 | `pages/2_Workload_Management.py` — supervisor dashboard and editors | live |
 
-152 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
+159 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
 `python scripts/smoke_test_sheet.py`.
 
 This is a **multipage app** (Streamlit's native `pages/` convention, same as
@@ -68,13 +69,17 @@ Everything contestable is in `config.py`.
 For supervisors. Each person's **year in hours** against an annual target:
 their role's Direct Instruction (DI) hrs/wk × FTE × 36 teaching weeks — 576 h
 for a full-time Teacher (The College Enterprise Agreement 2022, Sch B 2.7).
-The sidebar picks the year and an "as at" date. **Year plan**, **Calendar**
+The sidebar picks the year and an "as at" date. The app's theme is WSU crimson
+(#990033, `.streamlit/config.toml`), which is also the colour for *over*. **Year plan**, **Calendar**
 and **History** are setup tabs, hidden until *Show setup tabs* is switched on
 in the sidebar; their data counts either way, and a year with nothing in the
 Calendar uses the known block dates in `workload_config.BLOCK_DATES`.
 
 - **Staff** — name, role, FTE, supervisor, home discipline; one row per
-  person. Role sets the DI hrs/wk: Teacher (Ongoing) 16, Subject Coordinator
+  person. **Upload staff and teaching from Excel** (`workload_upload.py`): a
+  template with Staff and Teaching sheets and dropdowns; uploads are checked
+  and previewed, matched by Employee No then name, blank cells keep what's on
+  file, and a repeated teaching line updates rather than duplicates. Role sets the DI hrs/wk: Teacher (Ongoing) 16, Subject Coordinator
   10, Program Coordinator 6, Associate Director 0, Teacher (Casual) no
   target. All in `workload_config.ROLES`.
 - **Calendar** — each block of the year: start date and teaching weeks.
@@ -111,7 +116,7 @@ Calendar uses the known block dates in `workload_config.BLOCK_DATES`.
   **Export the grid** downloads it as Excel with the same colours. The UI says
   *Program* for what the Sheet stores as *Discipline*. Under it, per person: target, teaching, HDA / other duties, other allocated, projected
   total, ± target, to date, left (target − to date), average hrs/wk, and
-  hours per session. 🟢 on track (within ±5 %) · 🟠 off track — over ·
+  hours per session. 🟢 on track (within ±5 %) · 🔴 off track — over ·
   🟡 off track — under; filter by status, supervisor or program. The chart
   stacks each person's teaching by program plus HDA / other duties.
 

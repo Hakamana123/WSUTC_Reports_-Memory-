@@ -32,12 +32,13 @@ import workload_export as wexport
 import workload_rules as rules
 import workload_import as wimport
 import workload_store as wstore
+import workload_upload as wupload
 
 # Streamlit Cloud pulls a new commit without restarting Python: this page is
 # re-read from disk every run, but helper modules imported before the pull
 # (store.py, via IA Mapping) stay as the old code until the app is rebooted.
 # Reload them, in dependency order, so a push always takes effect here.
-for _m in (store, cfg, rules, wstore, wimport, wexport):
+for _m in (store, cfg, rules, wstore, wimport, wexport, wupload):
     importlib.reload(_m)
 
 from workload_store import ADJUSTMENTS, ALLOCATIONS, CALENDAR, PLANS, STAFF  # noqa: E402
@@ -122,8 +123,10 @@ def _add_rows(table, rows: list[dict]) -> None:
     if not rows:
         return
     df = data[table.name]
-    data[table.name] = pd.concat([df, pd.DataFrame(rows).reindex(columns=df.columns, fill_value="")],
-                                 ignore_index=True)
+    # rows may carry different columns (an upload fills in only what's given):
+    # every gap is "" as the Sheet stores it, never NaN
+    new = pd.DataFrame(rows).reindex(columns=df.columns).fillna("").astype(str)
+    data[table.name] = pd.concat([df, new], ignore_index=True)
     pending[table.name]["changed"].update(r["ID"] for r in rows)
     _bump()
 
@@ -444,7 +447,7 @@ with tab_dash:
         st.caption(
             "Each dot is a block someone works in, against their role's limit × FTE × the block's weeks: "
             f"🟢 healthy ({cfg.BLOCK_HEALTHY_FROM:.0%}–100 %) · 🟡 light (under {cfg.BLOCK_HEALTHY_FROM:.0%}) · "
-            "🟠 over · ⚪ casual (no limit). An empty block is normal — nobody teaches every block."
+            "🔴 over · ⚪ casual (no limit). An empty block is normal — nobody teaches every block."
             + (f" The shaded column is the current block ({now})." if now else "")
         )
 
@@ -465,7 +468,7 @@ with tab_dash:
         def _tint(v: float | None) -> str:
             band = rules.block_band(v)
             r, g_, b = (int(cfg.BAND_COLOURS[band][i:i + 2], 16) for i in (1, 3, 5))
-            alpha = {cfg.BAND_OVER: 0.5, cfg.BAND_CASUAL: 0.18}.get(band, 0.3)
+            alpha = {cfg.BAND_OVER: 0.35, cfg.BAND_CASUAL: 0.18}.get(band, 0.3)
             bold = "; font-weight: 600" if band == cfg.BAND_OVER else ""
             return f"background-color: rgba({r}, {g_}, {b}, {alpha}){bold}"
 
@@ -892,6 +895,62 @@ with tab_staff:
         "year. Untick Active for someone who's left — "
         "their history stays."
     )
+    with st.expander("⬆ Upload staff and teaching from Excel"):
+        st.caption(
+            "Download the template, fill in the **Staff** sheet — and the **Teaching** sheet too if you "
+            "like, one line per subject — then upload it. People already here are matched by Employee No, "
+            "then name; blank cells keep what's on file, so the same file can be uploaded again after "
+            "changes. Nothing is saved until you press Save."
+        )
+        st.download_button(
+            "⬇ Download the template", data=wupload.template_xlsx(disciplines, year_sessions),
+            file_name="workload_upload_template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        up_file = st.file_uploader("Filled-in file (.xlsx)", type=["xlsx"], key="wl_upload_file")
+        if up_file is not None:
+            up = wupload.parse_upload(up_file, disciplines)
+            ch = wupload.upload_changes(up, staff_df, alloc_df)
+            u = st.columns(4)
+            u[0].metric("New staff", len(ch.new_staff))
+            u[1].metric("Staff updated", len(ch.staff_updates))
+            u[2].metric("New teaching lines", len(ch.new_teaching))
+            u[3].metric("Teaching updated", len(ch.teaching_updates))
+            skipped = up.problems + ch.problems
+            if skipped:
+                st.warning(f"**{len(skipped)} row(s) skipped:**\n" + "\n".join(f"- {x}" for x in skipped))
+            if up.notes:
+                st.info("\n".join(f"- {x}" for x in up.notes))
+            name_by_id = {**dict(zip(staff_df["ID"], staff_df["Staff"])),
+                          **{r["ID"]: r["Staff"] for r in ch.new_staff}}
+            alloc_by_id = alloc_df.set_index("ID")
+            preview = (
+                [{"What": "New staff", "Who": r["Staff"],
+                  "Details": " · ".join(f"{c}: {r[c]}" for c in ("Role", "FTE", "Supervisor", "Home discipline")
+                                        if r.get(c))} for r in ch.new_staff]
+                + [{"What": "Staff updated", "Who": name_by_id.get(i, i),
+                    "Details": " · ".join(f"{c}: {v}" for c, v in upd.items())} for i, upd in ch.staff_updates.items()]
+                + [{"What": "New teaching", "Who": r["Staff"],
+                    "Details": " · ".join(str(r.get(c, "")) for c in ("Session", "Block", "Subject", "Discipline")
+                                          if r.get(c)) + f" · {r.get('DI hrs/wk', '')} hrs/wk"}
+                   for r in ch.new_teaching]
+                + [{"What": "Teaching updated", "Who": alloc_by_id.loc[i, "Staff"],
+                    "Details": f"{alloc_by_id.loc[i, 'Session']} {alloc_by_id.loc[i, 'Subject']} — "
+                    + " · ".join(f"{c}: {v}" for c, v in upd.items())} for i, upd in ch.teaching_updates.items()]
+            )
+            if preview:
+                st.dataframe(pd.DataFrame(preview), hide_index=True, use_container_width=True,
+                             height=min(38 + 35 * len(preview), 320))
+            if st.button(f"Apply {ch.count} change(s)", type="primary", disabled=not ch.count,
+                         help="Nothing to change." if not ch.count else None):
+                _add_rows(STAFF, ch.new_staff)
+                _update_rows(STAFF, ch.staff_updates)
+                _add_rows(ALLOCATIONS, ch.new_teaching)
+                _update_rows(ALLOCATIONS, ch.teaching_updates)
+                _bump()
+                st.toast(f"{ch.count} change(s) ready — press Save to keep them.")
+                st.rerun()
+
     vis = staff_df
     if sup_filter:
         vis = vis[vis["Supervisor"].isin(sup_filter) | (vis["Supervisor"] == "")]

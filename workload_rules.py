@@ -32,7 +32,7 @@ import pandas as pd
 import workload_config as cfg
 
 STATUS_ON = "🟢 On track"
-STATUS_OVER = "🟠 Off track — over"
+STATUS_OVER = "🔴 Off track — over"
 STATUS_UNDER = "🟡 Off track — under"
 STATUS_CASUAL = "⚪ Casual"
 STATUSES = [STATUS_ON, STATUS_OVER, STATUS_UNDER, STATUS_CASUAL]
