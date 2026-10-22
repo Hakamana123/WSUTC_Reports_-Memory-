@@ -403,17 +403,24 @@ with tab_dash:
                      delta=f"{confirmed:,.0f} confirmed" if summer.sum() else None, delta_color="off",
                      help="From the 🎯 Year plan: summer teaching hours needed to make up underloads.")
 
-        status_filter = st.multiselect(
+        f1, f2 = st.columns([1, 2])
+        find = f1.text_input("Find a person", placeholder="Type part of a name", key="wl_find",
+                             help="Narrows the work patterns, grid and tables to matching names.")
+        status_filter = f2.multiselect(
             "Show", rules.STATUSES, placeholder="Everyone — or pick a status",
             help="Filter the work patterns, grid and tables by status.",
         )
         shown = summary[summary["Status"].isin(status_filter)] if status_filter else summary
+        if find.strip():
+            shown = shown[shown["Staff"].str.contains(find.strip(), case=False, regex=False)]
+        if shown.empty:
+            st.info("Nobody matches — clear the search or the status filter.")
 
         # the year grid: one row per person, one column per block in calendar
         # order — the block's total hours, then what they do — tinted by how
         # full the block is; then the year against the target
         now = rules.current_block(cal_df, yy, as_at)
-        totals = shown.drop_duplicates("Staff").set_index("Staff")[["Target", "Total", "Variance", "Status"]]
+        totals = shown.drop_duplicates("Staff").set_index("Staff")[["Target", "Total", "Variance", "Status", "Now"]]
         g = (grid[grid["Staff"].isin(shown["Staff"])].drop_duplicates("Staff").join(totals, on="Staff")
              .sort_values("Staff").reset_index(drop=True))
 
@@ -442,13 +449,35 @@ with tab_dash:
                             legend=alt.Legend(orient="bottom")),
             tooltip=["Staff", "Block", alt.Tooltip("Hours:Q", format=",.0f"), "Of limit", "What"],
         ))
-        st.altair_chart(alt.layer(*layers).properties(height=alt.Step(30)).configure_view(stroke=None),
-                        use_container_width=True)
+        pace_rows = shown.drop_duplicates("Staff").assign(
+            Col=f"Now ({as_at:%d/%m})",
+            Detail=[("no target" if e is None or pd.isna(e) else
+                     f"to date {d:,.0f} h of {e:,.0f} h expected; {lft:,.0f} h left"
+                     + ("" if pos is None or pd.isna(pos) else f", {pos:,.0f} h possible"))
+                    for d, e, lft, pos in zip(shown.drop_duplicates("Staff")["To date"],
+                                              shown.drop_duplicates("Staff")["Expected to date"],
+                                              shown.drop_duplicates("Staff")["Left"],
+                                              shown.drop_duplicates("Staff")["Possible left"])],
+        )[["Staff", "Col", "Now", "Detail"]]
+        now_chart = alt.Chart(pace_rows).mark_circle(size=260, opacity=1).encode(
+            x=alt.X("Col:N", title=None, axis=alt.Axis(orient="top", labelAngle=0, domain=False, ticks=False)),
+            y=alt.Y("Staff:N", sort=list(g["Staff"]), axis=None),
+            color=alt.Color("Now:N", title=None, legend=alt.Legend(orient="bottom"),
+                            scale=alt.Scale(domain=rules.PACES, range=[rules.PACE_COLOURS[p_] for p_ in rules.PACES])),
+            tooltip=["Staff", "Now", alt.Tooltip("Detail:N", title="Why")],
+        ).properties(width=90, height=alt.Step(30))
+        st.altair_chart(
+            alt.hconcat(alt.layer(*layers).properties(height=alt.Step(30)), now_chart, spacing=4)
+            .resolve_scale(color="independent").configure_view(stroke=None),
+            use_container_width=True)
         st.caption(
             "Each dot is a block someone works in, against their role's limit × FTE × the block's weeks: "
             f"🟢 healthy ({cfg.BLOCK_HEALTHY_FROM:.0%}–100 %) · 🟡 light (under {cfg.BLOCK_HEALTHY_FROM:.0%}) · "
             "🔴 over · ⚪ casual (no limit). An empty block is normal — nobody teaches every block."
             + (f" The shaded column is the current block ({now})." if now else "")
+            + f" **Now** is where each person stands at the As at date ({as_at:%d/%m/%Y}): hours so far against "
+            "the target spread evenly over the year's teaching weeks (±"
+            f"{cfg.PACE_TOLERANCE:.0%} = on pace), and whether the hours left still fit in the weeks to come."
         )
 
         st.subheader("Year grid", divider="gray")
@@ -464,6 +493,7 @@ with tab_dash:
         view["Target"], view["Total"], view["Variance"] = (
             g["Target"].map(_txt(",.0f")), g["Total"].map(_txt(",.0f")), g["Variance"].map(_txt("+,.0f")))
         view["Status"] = g["Status"]
+        view["Now"] = g["Now"]
 
         def _tint(v: float | None) -> str:
             band = rules.block_band(v)
@@ -496,6 +526,8 @@ with tab_dash:
             "Target": st.column_config.TextColumn("Target (h)"),
             "Total": st.column_config.TextColumn("Total (h)", help="Projected year, incl. other allocated hours."),
             "Variance": st.column_config.TextColumn("± Target (h)"),
+            "Now": st.column_config.TextColumn(f"Now ({as_at:%d/%m})", help="Where they stand at the As at date "
+                                               "— see Work patterns."),
         }
         for s_, b_, lb in cfg.GRID_BLOCKS:
             grid_config[lb] = st.column_config.TextColumn(f"▶ {lb} · now" if lb == now else lb,

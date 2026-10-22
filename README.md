@@ -23,7 +23,7 @@ Axes* (Koh & Roffey, Sept 2026).
 | `workload_upload.py` — bulk staff / teaching upload from Excel | done |
 | `pages/2_Workload_Management.py` — supervisor dashboard and editors | live |
 
-159 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
+167 tests passing. Google Sheet setup: see `SETUP_GOOGLE_SHEET.md`, then
 `python scripts/smoke_test_sheet.py`.
 
 This is a **multipage app** (Streamlit's native `pages/` convention, same as
@@ -107,6 +107,11 @@ Calendar uses the known block dates in `workload_config.BLOCK_DATES`.
   **Work patterns**: a dot per person per block (SU2, AB1–4, SB1–4, SU1),
   coloured by how full the block is against the role's limit × FTE × its
   weeks — healthy (75–100 %), light, over, or casual (no limit).
+  Beside it, **Now** — where each person stands at the As at date: on pace
+  (hours to date within ±10 % of the target spread over the year's teaching
+  weeks), behind but can catch up, can't reach the target (hours left exceed
+  role limit × FTE × weeks to come), or ahead (heading over). **Find a
+  person** narrows the whole dashboard to matching names.
   **Year grid**: one row per person, one column per block showing its total
   hours, then subjects (tagged with the program when it isn't their home
   one) and duties (*Acting SC 24h*), tinted in the same colours; ▶ marks the

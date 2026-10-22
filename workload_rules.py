@@ -37,6 +37,17 @@ STATUS_UNDER = "🟡 Off track — under"
 STATUS_CASUAL = "⚪ Casual"
 STATUSES = [STATUS_ON, STATUS_OVER, STATUS_UNDER, STATUS_CASUAL]
 
+# "Now", at the As at date (see pace)
+PACE_ON = "🟢 On pace"
+PACE_BEHIND = "🟡 Behind — can catch up"
+PACE_SHORT = "🟠 Can't reach target"
+PACE_AHEAD = "🔴 Ahead — heading over"
+PACE_NONE = "⚪ No target"
+PACES = [PACE_ON, PACE_BEHIND, PACE_SHORT, PACE_AHEAD, PACE_NONE]
+PACE_COLOURS = {PACE_ON: cfg.BAND_COLOURS[cfg.BAND_HEALTHY], PACE_BEHIND: cfg.BAND_COLOURS[cfg.BAND_LIGHT],
+                PACE_SHORT: "#f58518", PACE_AHEAD: cfg.BAND_COLOURS[cfg.BAND_OVER],
+                PACE_NONE: cfg.BAND_COLOURS[cfg.BAND_CASUAL]}
+
 DUTIES = "HDA / other duties"
 
 
@@ -211,6 +222,23 @@ def status(total: float, target: float | None) -> str:
     return STATUS_ON
 
 
+def pace(to_date: float, expected: float | None, left: float | None, possible: float | None) -> str:
+    """Where someone stands now. `expected` = hours they'd have by now if the
+    target were spread evenly over the year's teaching weeks; `possible` =
+    the most they can still do (role limit × FTE × the weeks still to come).
+    Can't reach the target beats behind; casuals have no target."""
+    if expected is None or left is None:
+        return PACE_NONE
+    if possible is not None and left > possible + 1e-9:
+        return PACE_SHORT
+    band = expected * cfg.PACE_TOLERANCE
+    if to_date > expected + band + 1e-9:
+        return PACE_AHEAD
+    if to_date < expected - band - 1e-9:
+        return PACE_BEHIND
+    return PACE_ON
+
+
 def person_year(
     staff: dict,
     allocations: pd.DataFrame,
@@ -267,6 +295,9 @@ def person_year(
     total = teaching + duties + other
     to_date = teaching_done + duties_done + other_done
     target = plan_target(plan, role, f)
+    limit = role_limit(role, f)
+    expected = target * year_done / year_weeks if target is not None and year_weeks else None
+    possible = None if limit is None else limit * (year_weeks - year_done)
     return {
         "Staff": name,
         "Role": role,
@@ -281,6 +312,9 @@ def person_year(
         "Variance": None if target is None else total - target,
         "To date": to_date,
         "Left": None if target is None else target - to_date,
+        "Expected to date": expected,
+        "Possible left": possible,
+        "Now": pace(to_date, expected, None if target is None else target - to_date, possible),
         "Avg hrs/wk": total / cfg.ANNUAL_WEEKS,
         **{s: by_session[s] for s in cfg.SESSIONS},
         "by_discipline": by_discipline,

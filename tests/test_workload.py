@@ -173,6 +173,34 @@ def test_to_date_and_left():
     assert person("Ana", st_, al, calendar=c, as_at=pd.Timestamp("2027-01-01"))["To date"] == pytest.approx(96)
 
 
+@pytest.mark.parametrize("to_date, expected, left, possible, now", [
+    (100, 100, 476, 500, rules.PACE_ON), (92, 100, 484, 500, rules.PACE_ON),      # within 10 %
+    (80, 100, 496, 500, rules.PACE_BEHIND), (120, 100, 456, 500, rules.PACE_AHEAD),
+    (80, 100, 496, 400, rules.PACE_SHORT),                                       # 496 left, only 400 possible
+    (0, None, None, None, rules.PACE_NONE),
+])
+def test_pace(to_date, expected, left, possible, now):
+    assert rules.pace(to_date, expected, left, possible) == now
+
+
+def test_now_at_the_as_at_date():
+    """Default calendar: 12 blocks × 3 weeks = 36 weeks, all starting 2026-01-05
+    here so 'as at' 2026-01-11 (1 week in) passes 1 week of every block."""
+    st_ = staff({"Staff": "Ana"})
+    c = cal(start="2026-01-05")
+    p = person("Ana", st_, full_year("Ana", 16), calendar=c, as_at=pd.Timestamp("2026-01-11"))
+    # 12 weeks passed of 36: expected 192 h, done 192 h; 24 weeks left × 16 = 384 possible, 384 left
+    assert p["Expected to date"] == 192 and p["To date"] == 192 and p["Possible left"] == 384
+    assert p["Now"] == rules.PACE_ON
+    p = person("Ana", st_, full_year("Ana", 8), calendar=c, as_at=pd.Timestamp("2026-01-11"))
+    assert p["Now"] == rules.PACE_SHORT                                     # 480 left, 384 possible
+
+
+def test_casual_has_no_pace():
+    st_ = staff({"Staff": "Cas", "Role": "Teacher (Casual)"})
+    assert person("Cas", st_, full_year("Cas", 30))["Now"] == rules.PACE_NONE
+
+
 def test_elapsed_weeks_is_clamped():
     start = pd.Timestamp("2026-03-02")
     assert rules.elapsed_weeks(start, 3, pd.Timestamp("2026-03-01")) == 0

@@ -174,3 +174,9 @@ BAND_COLOURS: dict[str, str] = {
     BAND_LIGHT: "#eeca3b",
     BAND_CASUAL: "#9e9e9e",
 }
+
+# "Now": where someone stands at the As at date. Hours to date within this
+# share of the hours expected by then (target × the share of the year's
+# teaching weeks passed) = on pace. Wider than ON_TRACK_TOLERANCE, as a
+# planned gap between blocks moves hours to date more than the year total.
+PACE_TOLERANCE: float = 0.10
