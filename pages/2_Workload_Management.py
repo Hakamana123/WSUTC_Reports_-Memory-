@@ -446,7 +446,7 @@ with tab_dash:
             x=x, y=y,
             color=alt.Color("Band:N", title=None,
                             scale=alt.Scale(domain=bands, range=list(cfg.BAND_COLOURS.values())),
-                            legend=alt.Legend(orient="bottom")),
+                            legend=alt.Legend(orient="top", direction="horizontal")),
             tooltip=["Staff", "Block", alt.Tooltip("Hours:Q", format=",.0f"), "Of limit", "What"],
         ))
         pace_rows = shown.drop_duplicates("Staff").assign(
@@ -462,14 +462,18 @@ with tab_dash:
         now_chart = alt.Chart(pace_rows).mark_circle(size=260, opacity=1).encode(
             x=alt.X("Col:N", title=None, axis=alt.Axis(orient="top", labelAngle=0, domain=False, ticks=False)),
             y=alt.Y("Staff:N", sort=list(g["Staff"]), axis=None),
-            color=alt.Color("Now:N", title=None, legend=alt.Legend(orient="bottom"),
+            color=alt.Color("Now:N", title=None, legend=alt.Legend(orient="top", direction="horizontal",
+                                                                   columns=3),
                             scale=alt.Scale(domain=rules.PACES, range=[rules.PACE_COLOURS[p_] for p_ in rules.PACES])),
             tooltip=["Staff", "Now", alt.Tooltip("Detail:N", title="Why")],
-        ).properties(width=90, height=alt.Step(30))
-        st.altair_chart(
-            alt.hconcat(alt.layer(*layers).properties(height=alt.Step(30)), now_chart, spacing=4)
-            .resolve_scale(color="independent").configure_view(stroke=None),
-            use_container_width=True)
+        ).properties(width=110, height=alt.Step(30))
+        patterns = (alt.hconcat(alt.layer(*layers).properties(width=alt.Step(52), height=alt.Step(30)), now_chart,
+                                spacing=4)
+                    .resolve_scale(color="independent").configure_view(stroke=None))
+        # a long staff list scrolls inside a box (legends at the top stay in view)
+        n_rows = len(g)
+        with st.container(height=560 if n_rows > 15 else "content", border=n_rows > 15):
+            st.altair_chart(patterns, use_container_width=False)
         st.caption(
             "Each dot is a block someone works in, against their role's limit × FTE × the block's weeks: "
             f"🟢 healthy ({cfg.BLOCK_HEALTHY_FROM:.0%}–100 %) · 🟡 light (under {cfg.BLOCK_HEALTHY_FROM:.0%}) · "
